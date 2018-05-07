@@ -1,0 +1,4 @@
+"0","plot(psis(logr[, -(1:L)]))"
+"2","Relative effective sample sizes ('r_eff' argument) not specified. PSIS n_eff will not adjusted based on MCMC n_eff."
+"2","Some Pareto k diagnostic values are too high. See help('pareto-k-diagnostic') for details.
+"

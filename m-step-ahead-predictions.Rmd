@@ -1,0 +1,346 @@
+---
+title: "PSIS assisted m-step-ahead predictions for time-series models"
+author: Paul Buerkner, Aki Vehtari
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  cache=TRUE, 
+  message=FALSE, 
+  error=FALSE,
+  warning=FALSE, 
+  comment=NA, 
+  dev = "png",
+  dpi = 150,
+  fig.asp = 0.618,
+  fig.width = 5,
+  out.width = "60%",
+  fig.align = "center"
+)
+library(brms)
+library(loo)
+SEED <- 1234
+set.seed(SEED)
+```
+
+## Introduction
+
+The idea of m-step-ahead predictions (m-SAP) for time-series models is to predict ($m$ steps) ahead using only past values of the time-series and no future values. Doing exact MSAP requires repeatedly fitting the model for each set of m-steps to be predicted. This is usually very time-intensive in particular for Bayesian models and so we seek to approximate MSAP using as few refits of the model as possible.
+
+## 1-step-ahead predictions
+
+Assume we have a time-series of observations $(y_1, y_2, ..., y_N)$, then the goal of 1-SAP is to compute the quantities $p(y_i | y_{1},...,y_{i-1}) = p(y_i | y_{<i})$ for all $i$ between $L + 1$ and $N$, where $L$ is the minimum number of values required to make predictions (e.g., $L = 10$ if we want to start with predicting the $11$th observation). The quantities $p(y_i | y_{<i})$ can be computed as follows with the help of the posterior distribution $p(\theta | y_{<i})$ of the parameters $\theta$ based on the $i-1$ earliest observations of the time-series:
+$$
+p(y_i | y_{<i}) = \int p(y_i\,|\,y_{<i}, \theta) \, p(\theta\,|\,y_{<i}) \,d\theta.
+$$
+Having obtained $S$ random draws $\theta_{<i}^{(s)}$ ($s = 1,...,S$) of the posterior distribution $p(\theta\,|\,y_{<i})$, we can estimate $p(y_i | y_{<i})$ as follows:
+
+$$
+ p(y_i\,|\,y_{<i}) \approx \sum_{s=1}^S p(y_i\,|\,y_{<i}, \theta_{<i}^{(s)}),
+$$
+In the following, we consider factorized models in which the response values are conditionally independent given the parameters and the likelihood
+can be written in the familiar form
+
+$$
+p(y \,|\, \theta) = \prod_{i=1}^N p(y_i \,|\, \theta).
+$$
+In this case, $p(y_i\,|\, y_{<i}, \theta_{<i})$ reduces to $p(y_i\,|\, \theta_{<i})$.
+
+## Approximate 1-SAP using integrated importance-sampling
+
+To reduce the number of models that need to be fitted for the purpose of obtaining $p(y_i\,|\,y_{<i})$, we propose the following algorithm. Starting with the last observation (i.e. $i = N$), we compute $p(y_i\,|\,y_{<i})$ with approximate leave-one-out cross-validation (LOO-CV) using integrated importance sampling (Vehtari et al., 2016, Section 3.6.1):
+
+$$
+ p(y_i\,|\,y_{<i}) \approx
+   \frac{ \sum_{s=1}^S p(y_i\,|\, \theta^{(s)}) \,w_i^{(s)}}{ \sum_{s=1}^S w_i^{(s)}},
+$$
+
+where $w_i^{(s)}$ are importance weights and $\theta^{(s)}$ are draws from the posterior distribution based on all observations. To obtain $w_N^{(s)}$ for the last observation $N$, we first compute the raw importance ratios
+
+$$
+r_N^{(s)} \propto \frac{1}{p(y_N \,|\, \,\theta^{(s)})},
+$$
+
+and then stabilize them using Pareto smoothed importance sampling (PSIS, Vehtari et al, 2017ab). We then gradually decrease $i$ by $1$ and compute the raw importance ratios as
+
+$$
+r_i^{(s)} \propto \frac{1}{\prod_{j = i}^N p(y_j \,|\, \,\theta^{(s)})}
+$$
+and again stabilize them using PSIS to obtain $w_i^{(s)}$. At some observation $i$, the variability in $r_i^{(s)}$ will become too large to that the PSIS approximation will fail (Pareto-k-values greater than $0.7$). Then we refit the model using only observations up to the $i$th one (ideally not including $i$ to get exact LOO for $i$) and restart the process until we arrived at the $L+1$th observation.
+
+## Autoregressive models
+
+Simulate some data:
+
+```{r}
+df <- data.frame(
+  y = arima.sim(list(ar = c(0.7, 0.3, -0.3, 0.2)), 100), 
+  t = 1:100
+)
+ggplot(df, aes(t, y)) + geom_line()
+```
+
+Fit an AR(p) model:
+
+```{r fit_ar, results = "hide"}
+N <- nrow(df)
+df$ym1 <- c(0, df$y[-N])
+df$ym2 <- c(0, 0, df$y[-(N:(N-1))])
+df$ym3 <- c(0, 0, 0, df$y[-(N:(N-2))])
+df$ym4 <- c(0, 0, 0, 0, df$y[-(N:(N-3))])
+fit_ar <- brm(y ~ ym1 + ym2 + ym3 + ym4, df, seed = SEED)
+```
+
+Plot predictions:
+
+```{r, cache = FALSE}
+pred <- cbind(df, predict(fit_ar))
+names(pred) <- make.names(names(pred))
+ggplot(pred, aes(t, Estimate)) +
+  geom_smooth(
+    aes(ymin = X2.5.ile, ymax = X97.5.ile),
+    stat = "identity"
+  ) +
+  geom_point(aes(t, y), inherit.aes = FALSE)
+```
+
+Compute approximate LOO:
+
+```{r, cache = FALSE}
+LOO(fit_ar)
+```
+
+## 1-step-ahead predictions leaving out all future values
+
+### Exact 1-step-ahead predictions
+
+```{r exact_loglik, results="hide"}
+N <- max(df$t)
+L <- 10
+loglik <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+for (i in N:(L + 1)) {
+  fit_i <- update(fit_ar, newdata = df[-(i:N), ], recompile = FALSE)
+  loglik[, i] <- log_lik(fit_i, newdata = df[i, ])
+}
+```
+
+```{r, cache = FALSE}
+log_mean_exp <- function(x) {
+  # more stable than log(mean(exp(x)))
+  max_x <- max(x)
+  max_x + log(sum(exp(x - max_x))) - log(length(x))
+}
+exact_elpds_1sap <- apply(loglik, 2, log_mean_exp)
+(exact_elpd_1sap <- sum(exact_elpds_1sap[-(1:L)]))
+```
+
+### Approximate 1-step-ahead predictions
+
+```{r}
+k_thres <- 0.7
+```
+
+Compute approximate 1-SAP without refit:
+
+```{r loglik}
+loglik <- logr <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+for (i in N:(L + 1)) {
+  loglik[, i] <- log_lik(fit_ar, newdata = df[i, ])
+  logr[, i] <- - rowSums(loglik[, i:N, drop = FALSE])
+}
+```
+
+```{r, cache = FALSE}
+is_na <- apply(logr, 2, anyNA)
+plot(psis(logr[, !is_na]))
+```
+
+Compute approximate 1-SAP with refit:
+
+```{r refit_loglik, results="hide"}
+loglik <- logr <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+approx_elpds_1sap <- rep(NA, nrow(df))
+fit_part <- fit_ar
+i_refit <- N
+refits <- NULL
+for (i in N:(L + 1)) {
+  loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+  logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
+  psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+  if (any(psis_part$diagnostics$pareto_k > k_thres)) {
+    # refit the model based on the first i observations
+    # could be improved by computing exact LOO for the ith observation
+    i_refit <- i
+    refits <- c(refits, i)
+    fit_part <- update(fit_part, newdata = df[1:i, ], recompile = FALSE)
+    loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+    logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
+    psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+  }
+  w_i <- exp(psis_part$log_weights[, 1])
+  approx_elpds_1sap[i] <- log(sum(exp(loglik[, i]) * w_i) / sum(w_i))
+}
+```
+
+```{r, cache = FALSE}
+print(refits)
+is_na <- apply(logr, 2, anyNA)
+plot(psis(logr[, !is_na]))
+```
+
+```{r, cache = FALSE}
+(approx_elpd_1sap <- sum(approx_elpds_1sap, na.rm = TRUE))
+```
+
+
+## m-step-ahead predictions leaving out all future values
+
+Using 4-step-ahead predictions as example.
+
+### Exact m-step-ahead predictions
+
+```{r exact_loglikm, results="hide"}
+m <- 4
+loglikm <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+for (i in (N - m + 1):(L + 1)) {
+  fit_i <- update(fit_ar, newdata = df[-(i:N), ], recompile = FALSE)
+  ll <- log_lik(fit_i, newdata = df[i:(i + m - 1), ])
+  loglikm[, i] <- rowSums(ll)
+}
+```
+
+```{r, cache = FALSE}
+exact_elpds_4sap <- apply(loglikm, 2, log_mean_exp)
+(exact_elpd_4sap <- sum(exact_elpds_4sap, na.rm = TRUE))
+```
+
+### Approximate m-step-ahead predictions
+
+```{r refit_loglikm, results="hide"}
+loglikm <- loglik <- logr <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+approx_elpds_4sap <- rep(NA, nrow(df))
+fit_part <- fit_ar
+i_refit <- N-m+1
+refits <- NULL
+for (i in N:(N - m + 2)) {
+  loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+}
+for (i in (N - m + 1):(L + 1)) {
+  loglikm[, i] <- rowSums(log_lik(fit_part, newdata = df[i:(i + m - 1), ]))
+  loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+  logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
+  psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+  if (any(psis_part$diagnostics$pareto_k > k_thres)) {
+    # refit the model based on the first i observations
+    # could be improved by computing exact LOO for the ith observation
+    i_refit <- i
+    refits <- c(refits, i)
+    fit_part <- update(fit_part, newdata = df[1:i, ], recompile = FALSE)
+    loglikm[, i] <- rowSums(log_lik(fit_part, newdata = df[i:(i + m -1), ]))
+    loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+    logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
+    psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+  }
+  w_i <- exp(psis_part$log_weights[, 1])
+  approx_elpds_4sap[i] <- log(sum(exp(loglikm[, i]) * w_i) / sum(w_i))
+}
+```
+
+```{r, cache = FALSE}
+print(refits)
+is_na <- apply(logr, 2, anyNA)
+plot(psis(logr[, !is_na]))
+```
+
+```{r, cache = FALSE}
+(approx_elpd_4sap <- sum(approx_elpds_4sap, na.rm = TRUE))
+```
+
+
+## 1-step-ahead predictions leaving out blocks of future values
+
+### Exact 1-step-ahead predictions
+
+```{r exact_loglik_block, results="hide"}
+block <- 10
+loglik <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+for (i in N:(L + 1)) {
+  to <- min(i + block - 1, N)
+  fit_i <- update(fit_ar, newdata = df[-(i:to), ], recompile = FALSE)
+  loglik[, i] <- log_lik(fit_i, newdata = df[i, ])
+}
+```
+
+```{r, cache = FALSE}
+exact_elpds_1sap_block <- apply(loglik, 2, log_mean_exp)
+(exact_elpd_1sap_block <- sum(exact_elpds_1sap_block, na.rm = TRUE))
+```
+
+### Approximate 1-step-ahead predictions
+
+```{r refit_loglik_block, results="hide"}
+loglik <- logr <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+approx_elpds_1sap_block <- rep(NA, nrow(df))
+fit_part <- fit_ar
+i_refit <- N
+refits <- NULL
+for (i in N:(L + 1)) {
+  loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+  to <- min(i + block - 1, i_refit)
+  logr[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
+  psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+  if (any(psis_part$diagnostics$pareto_k > k_thres)) {
+    # refit the model based on the first i observations
+    # could be improved by computing exact LOO for the ith observation
+    i_refit <- i
+    refits <- c(refits, i)
+    fit_part <- update(fit_part, newdata = df[1:i, ], recompile = FALSE)
+    loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+    logr[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
+    psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+  }
+  w_i <- exp(psis_part$log_weights[, 1])
+  approx_elpds_1sap_block[i] <- log(sum(exp(loglik[, i]) * w_i) / sum(w_i))
+}
+```
+
+```{r, cache = FALSE}
+print(refits)
+is_na <- apply(logr, 2, anyNA)
+plot(psis(logr[, !is_na]))
+```
+
+```{r, cache = FALSE}
+(approx_elpd_1sap_block <- sum(approx_elpds_1sap_block, na.rm = TRUE))
+```
+
+
+<br />
+
+## References
+
+Vehtari A., Mononen T., Tolvanen V., Sivula T., & Winther O. (2016). Bayesian leave-one-out cross-validation approximations for Gaussian latent variable models. *Journal of Machine Learning Research*, 17(103), 1--38. [Online](http://jmlr.org/papers/v17/14-540.html).
+
+Vehtari A., Gelman A., & Gabry J. (2017a). Practical Bayesian model evaluation using leave-one-out cross-validation and WAIC. *Statistics and Computing*, 27(5), 1413--1432. doi:10.1007/s11222-016-9696-4. [Online](http://link.springer.com/article/10.1007/s11222-016-9696-4). [arXiv preprint arXiv:1507.04544](https://arxiv.org/abs/1507.04544).
+
+Vehtari A., Gelman A., & Gabry J. (2017b). Pareto smoothed importance sampling. [arXiv preprint arXiv:1507.02646](https://arxiv.org/abs/1507.02646).
+
+<br />
+
+## Appendix
+
+### Appendix: Session information
+
+```{r}
+sessionInfo()
+```
+
+### Appendix: Licenses
+
+* Code &copy; 2018, Paul Buerkner, Aki Vehtari, licensed under BSD-3.
+* Text &copy; 2018, Paul Buerkner, Aki Vehtari, licensed under CC-BY-NC 4.0.
