@@ -78,41 +78,38 @@ and again stabilize them using PSIS to obtain $w_i^{(s)}$. At some observation $
 Simulate some data:
 
 ```{r}
-df <- data.frame(
-  y = arima.sim(list(ar = c(0.7, 0.3, -0.3, 0.2)), 100), 
-  t = 1:100
-)
-ggplot(df, aes(t, y)) + geom_line()
+df <- data.frame(y = as.numeric(LakeHuron))
+N <- nrow(df)
+df$time <- 1:N
 ```
 
 Fit an AR(p) model:
 
-```{r fit_ar, results = "hide"}
-N <- nrow(df)
-df$ym1 <- c(0, df$y[-N])
-df$ym2 <- c(0, 0, df$y[-(N:(N-1))])
-df$ym3 <- c(0, 0, 0, df$y[-(N:(N-2))])
-df$ym4 <- c(0, 0, 0, 0, df$y[-(N:(N-3))])
-fit_ar <- brm(y ~ ym1 + ym2 + ym3 + ym4, df, seed = SEED)
+```{r fit, results = "hide"}
+control <- list(adapt_delta = 0.95)
+fit <- brm(
+  y ~ 1, data = df, autocor = cor_ar(~time, p = 2), 
+  control = control, seed = SEED
+)
 ```
 
 Plot predictions:
 
 ```{r, cache = FALSE}
-pred <- cbind(df, predict(fit_ar))
+pred <- cbind(df, predict(fit))
 names(pred) <- make.names(names(pred))
-ggplot(pred, aes(t, Estimate)) +
+ggplot(pred, aes(time, Estimate)) +
   geom_smooth(
     aes(ymin = X2.5.ile, ymax = X97.5.ile),
     stat = "identity"
   ) +
-  geom_point(aes(t, y), inherit.aes = FALSE)
+  geom_point(aes(time, y), inherit.aes = FALSE)
 ```
 
 Compute approximate LOO:
 
 ```{r, cache = FALSE}
-LOO(fit_ar)
+LOO(fit)
 ```
 
 ## 1-step-ahead predictions leaving out all future values
@@ -120,12 +117,11 @@ LOO(fit_ar)
 ### Exact 1-step-ahead predictions
 
 ```{r exact_loglik, results="hide"}
-N <- max(df$t)
 L <- 10
-loglik <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+loglik <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 for (i in N:(L + 1)) {
-  fit_i <- update(fit_ar, newdata = df[-(i:N), ], recompile = FALSE)
-  loglik[, i] <- log_lik(fit_i, newdata = df[i, ])
+  fit_i <- update(fit, newdata = df[-(i:N), ], recompile = FALSE, chains = 1)
+  loglik[, i] <- log_lik(fit_i, newdata = df[1:i, ])[, i]
 }
 ```
 
@@ -148,9 +144,9 @@ k_thres <- 0.7
 Compute approximate 1-SAP without refit:
 
 ```{r loglik}
-loglik <- logr <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+loglik <- log_lik(fit)
+logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 for (i in N:(L + 1)) {
-  loglik[, i] <- log_lik(fit_ar, newdata = df[i, ])
   logr[, i] <- - rowSums(loglik[, i:N, drop = FALSE])
 }
 ```
@@ -163,13 +159,13 @@ plot(psis(logr[, !is_na]))
 Compute approximate 1-SAP with refit:
 
 ```{r refit_loglik, results="hide"}
-loglik <- logr <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+loglik <- logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 approx_elpds_1sap <- rep(NA, nrow(df))
-fit_part <- fit_ar
+fit_part <- fit
 i_refit <- N
 refits <- NULL
 for (i in N:(L + 1)) {
-  loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+  loglik[, i] <- log_lik(fit_part)[, i]
   logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   if (any(psis_part$diagnostics$pareto_k > k_thres)) {
@@ -177,8 +173,11 @@ for (i in N:(L + 1)) {
     # could be improved by computing exact LOO for the ith observation
     i_refit <- i
     refits <- c(refits, i)
-    fit_part <- update(fit_part, newdata = df[1:i, ], recompile = FALSE)
-    loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+    fit_part <- update(
+      fit_part, newdata = df[1:i, ], 
+      recompile = FALSE, chains = 1
+    )
+    loglik[, i] <- log_lik(fit_part)[, i]
     logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
     psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   }
@@ -206,11 +205,11 @@ Using 4-step-ahead predictions as example.
 
 ```{r exact_loglikm, results="hide"}
 m <- 4
-loglikm <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+loglikm <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 for (i in (N - m + 1):(L + 1)) {
-  fit_i <- update(fit_ar, newdata = df[-(i:N), ], recompile = FALSE)
-  ll <- log_lik(fit_i, newdata = df[i:(i + m - 1), ])
-  loglikm[, i] <- rowSums(ll)
+  fit_i <- update(fit, newdata = df[-(i:N), ], recompile = FALSE, chains = 1)
+  ll <- log_lik(fit_i, newdata = df[1:(i + m - 1), ])
+  loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
 }
 ```
 
@@ -222,17 +221,16 @@ exact_elpds_4sap <- apply(loglikm, 2, log_mean_exp)
 ### Approximate m-step-ahead predictions
 
 ```{r refit_loglikm, results="hide"}
-loglikm <- loglik <- logr <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+loglikm <- loglik <- logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 approx_elpds_4sap <- rep(NA, nrow(df))
-fit_part <- fit_ar
+fit_part <- fit
 i_refit <- N-m+1
 refits <- NULL
-for (i in N:(N - m + 2)) {
-  loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
-}
+loglik[, (N - m + 2):N] <- log_lik(fit_part)[, (N - m + 2):N]
 for (i in (N - m + 1):(L + 1)) {
-  loglikm[, i] <- rowSums(log_lik(fit_part, newdata = df[i:(i + m - 1), ]))
-  loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+  ll <- log_lik(fit_part, newdata = df[1:(i + m - 1), ])
+  loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
+  loglik[, i] <- ll[, i]
   logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   if (any(psis_part$diagnostics$pareto_k > k_thres)) {
@@ -240,9 +238,13 @@ for (i in (N - m + 1):(L + 1)) {
     # could be improved by computing exact LOO for the ith observation
     i_refit <- i
     refits <- c(refits, i)
-    fit_part <- update(fit_part, newdata = df[1:i, ], recompile = FALSE)
-    loglikm[, i] <- rowSums(log_lik(fit_part, newdata = df[i:(i + m -1), ]))
-    loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+    fit_part <- update(
+      fit_part, newdata = df[1:i, ], 
+      recompile = FALSE, chains = 1
+    )
+    ll <- log_lik(fit_part, newdata = df[1:(i + m - 1), ])
+    loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
+    loglik[, i] <- ll[, i]
     logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
     psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   }
@@ -268,11 +270,11 @@ plot(psis(logr[, !is_na]))
 
 ```{r exact_loglik_block, results="hide"}
 block <- 10
-loglik <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+loglik <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 for (i in N:(L + 1)) {
   to <- min(i + block - 1, N)
-  fit_i <- update(fit_ar, newdata = df[-(i:to), ], recompile = FALSE)
-  loglik[, i] <- log_lik(fit_i, newdata = df[i, ])
+  fit_i <- update(fit, newdata = df[-(i:to), ], recompile = FALSE, chains = 1)
+  loglik[, i] <- log_lik(fit_i, newdata = df[1:i, ])[, i]
 }
 ```
 
@@ -284,13 +286,13 @@ exact_elpds_1sap_block <- apply(loglik, 2, log_mean_exp)
 ### Approximate 1-step-ahead predictions
 
 ```{r refit_loglik_block, results="hide"}
-loglik <- logr <- matrix(nrow = nsamples(fit_ar), ncol = nrow(df))
+loglik <- logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 approx_elpds_1sap_block <- rep(NA, nrow(df))
-fit_part <- fit_ar
+fit_part <- fit
 i_refit <- N
 refits <- NULL
 for (i in N:(L + 1)) {
-  loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+  loglik[, i] <- log_lik(fit_part)[, i]
   to <- min(i + block - 1, i_refit)
   logr[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
@@ -299,8 +301,11 @@ for (i in N:(L + 1)) {
     # could be improved by computing exact LOO for the ith observation
     i_refit <- i
     refits <- c(refits, i)
-    fit_part <- update(fit_part, newdata = df[1:i, ], recompile = FALSE)
-    loglik[, i] <- log_lik(fit_part, newdata = df[i, ])
+    fit_part <- update(
+      fit_part, newdata = df[1:i, ], 
+      recompile = FALSE, chains = 1
+    )
+    loglik[, i] <- log_lik(fit_part)[, i]
     logr[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
     psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   }
