@@ -31,7 +31,7 @@ set.seed(SEED)
 
 ## Introduction
 
-The idea of m-step-ahead predictions (m-SAP) for time-series models is to predict ($m$ steps) ahead using only past values of the time-series and no future values. Doing exact MSAP requires repeatedly fitting the model for each set of m-steps to be predicted. This is usually very time-intensive in particular for Bayesian models and so we seek to approximate MSAP using as few refits of the model as possible.
+The idea of m-step-ahead predictions (m-SAP) for time-series models is to predict ($m$ steps) ahead using only past values of the time-series and no future values. Doing exact m-SAP requires repeatedly fitting the model for each set of m-steps to be predicted. This is usually very time-intensive in particular for Bayesian models and so we seek to approximate m-SAP using as few refits of the model as possible.
 
 ## 1-step-ahead predictions
 
@@ -54,6 +54,8 @@ In this case, $p(y_i\,|\, y_{<i}, \theta_{<i})$ reduces to $p(y_i\,|\, \theta_{<
 
 ## Approximate 1-SAP using integrated importance-sampling
 
+TODO: directly define m-SAP.
+
 To reduce the number of models that need to be fitted for the purpose of obtaining $p(y_i\,|\,y_{<i})$, we propose the following algorithm. Starting with the last observation (i.e. $i = N$), we compute $p(y_i\,|\,y_{<i})$ with approximate leave-one-out cross-validation (LOO-CV) using integrated importance sampling (Vehtari et al., 2016, Section 3.6.1):
 
 $$
@@ -72,29 +74,45 @@ and then stabilize them using Pareto smoothed importance sampling (PSIS, Vehtari
 $$
 r_i^{(s)} \propto \frac{1}{\prod_{j = i}^N p(y_j \,|\, \,\theta^{(s)})}
 $$
-and again stabilize them using PSIS to obtain $w_i^{(s)}$. At some observation $i$, the variability in $r_i^{(s)}$ will become too large to that the PSIS approximation will fail (Pareto-k-values greater than $0.7$). Then we refit the model using only observations up to the $i$th one (ideally not including $i$ to get exact LOO for $i$) and restart the process until we arrived at the $L+1$th observation.
+and again stabilize them using PSIS to obtain $w_i^{(s)}$. At some observation $i$, the variability in $r_i^{(s)}$ will become too large to that the PSIS approximation will fail (Pareto-k-values greater than $0.7$). Then we refit the model using only observations up to the $i$th one and restart the process until we arrived at the $L+1$th observation, where $L$ is the minimum sample size required to make predictions ($L=0$ if predictions of all observations should be computed).
+
+Depending on the particular time-series model and data, the Pareto-k-values will exceed $0.7$ rather quickly (i.e. after only few observations) and thus many refits may be required even if applying the above described algorithm. In this case, an option is to exclude only a number of $B$ future values which directly follow the observations to be predicted while keeping all more distant future values $B+1$ to $N$. This will usually result in lower Pareto-k-values and thus less refitting. The block-m-SAP resembles the basic m-SAP closely only if values in the distant future (that is farer away than $B$ steps) contain little information about the current observations being predicted. Whether this assumption is justified depends on the data and applied time-series model.
 
 ## Autoregressive models
 
-Simulate some data:
+Autoregressive (AR) models are one of the classic time-series models. An AR-model of order $p$ can be defined as
+
+$$
+Y_i = \eta_i + \sum_{k = 1}^p \varphi_k Y_{i - k} + \varepsilon_i,
+$$
+where $\eta_i$ is the linear predictor of observation $i$, $\phi_k$ are the autoregressive parameters and $\varepsilon_i$ are pairwise independent errors, which are usually assumed to be normally distributed with equal variance $\sigma^2$. The model implies a recursive formula that allows to compute the right-hand side of the above equation for observation $i$ based on the equations' solution for all past observations $1$ to $i-1$.
+
+Case Study: Annual measurements of the level of Lake Huron
+
+To illustrate the application of m-SAP, we will use the annual measurements of the level (in feet) of Lake Huron 1875–1972 as a case study, which is shipped natively with **R**.
+
+```{r}
+plot(LakeHuron)
+```
+
+The above plot shows rather strong autocorrelation of the time-series as well as some trend towards lower levels for later points in time. For model fitting, we turn the time-series into a data frame.
 
 ```{r}
 df <- data.frame(y = as.numeric(LakeHuron))
-N <- nrow(df)
-df$time <- 1:N
+df$time <- 1:nrow(df)
 ```
 
-Fit an AR(p) model:
+and then specify an AR(2) model on these data using the **brms** package.
 
 ```{r fit, results = "hide"}
-control <- list(adapt_delta = 0.95)
+control <- list(adapt_delta = 0.99)
 fit <- brm(
   y ~ 1, data = df, autocor = cor_ar(~time, p = 2), 
   control = control, seed = SEED
 )
 ```
 
-Plot predictions:
+The model implied predictions along with the observed values can be plotted, which reveals a rather good fit to the data.
 
 ```{r, cache = FALSE}
 pred <- cbind(df, predict(fit))
@@ -107,7 +125,7 @@ ggplot(pred, aes(time, Estimate)) +
   geom_point(aes(time, y), inherit.aes = FALSE)
 ```
 
-Compute approximate LOO:
+For the purpose of later comparison, we perform approximate leave-one-out cross-validation (LOO) as baseline whos accurarcy for 1-SAP we seek to improve.
 
 ```{r, cache = FALSE}
 LOO(fit)
@@ -118,11 +136,17 @@ LOO(fit)
 ### Exact 1-step-ahead predictions
 
 ```{r exact_loglik, results="hide"}
-L <- 10
-loglik <- matrix(nrow = nsamples(fit), ncol = nrow(df))
-for (i in N:(L + 1)) {
+N <- nrow(df)
+L <- 0
+loglik <- matrix(nrow = nsamples(fit), ncol = N)
+for (i in N:max(L + 1, 2)) {
   fit_i <- update(fit, newdata = df[-(i:N), ], recompile = FALSE, chains = 1)
   loglik[, i] <- log_lik(fit_i, newdata = df[1:i, ])[, i]
+}
+if (L == 0) {
+  # no prior observations for the first observation
+  fit_i <- update(fit, sample_prior = "only", recompile = FALSE, chains = 1)
+  loglik[, 1] <- log_lik(fit_i, newdata = df[1, ])[, 1]
 }
 ```
 
@@ -171,7 +195,6 @@ for (i in N:(L + 1)) {
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   if (any(psis_part$diagnostics$pareto_k > k_thres)) {
     # refit the model based on the first i observations
-    # could be improved by computing exact LOO for the ith observation
     i_refit <- i
     refits <- c(refits, i)
     fit_part <- update(
@@ -204,15 +227,19 @@ dat_elpd <- data.frame(
   approx_elpd = approx_elpds_1sap,
   exact_elpd = exact_elpds_1sap
 )
+
+outlier0.5 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.5)
+outlier0.25 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.25)
+
 ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
   geom_abline(color = "gray30") +
   geom_point(size = 2) +
-  geom_point(data = dat_elpd[17, ], size = 3, color = "red3") +
+  geom_point(data = dat_elpd[outlier0.5, ], size = 3, color = "red3") +
   xlab("Approximate elpds") +
   ylab("Exact elpds") 
 ```
 
-The `r which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.5)`th observation(s) show a distance between exact and approximate elpd of more than $0.5$. The `r which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.25)`th observation(s) show a distance between exact and approximate elpd of more than $0.25$.
+The `r outlier0.5`th observation(s) show a distance between exact and approximate elpd of more than $0.5$. The `r outlier0.25`th observation(s) show a distance between exact and approximate elpd of more than $0.25$.
 
 ## m-step-ahead predictions leaving out all future values
 
@@ -223,10 +250,16 @@ Using 4-step-ahead predictions as example.
 ```{r exact_loglikm, results="hide"}
 m <- 4
 loglikm <- matrix(nrow = nsamples(fit), ncol = nrow(df))
-for (i in (N - m + 1):(L + 1)) {
+for (i in (N - m + 1):max(L + 1, 2)) {
   fit_i <- update(fit, newdata = df[-(i:N), ], recompile = FALSE, chains = 1)
   ll <- log_lik(fit_i, newdata = df[1:(i + m - 1), ])
   loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
+}
+if (L == 0) {
+  # no past observations for the first observation
+  fit_i <- update(fit, sample_prior = "only", recompile = FALSE, chains = 1)
+  ll <- log_lik(fit_i, newdata = df[1:m, ])
+  loglikm[, 1] <- rowSums(ll[, 1:m])
 }
 ```
 
@@ -252,7 +285,6 @@ for (i in (N - m + 1):(L + 1)) {
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   if (any(psis_part$diagnostics$pareto_k > k_thres)) {
     # refit the model based on the first i observations
-    # could be improved by computing exact LOO for the ith observation
     i_refit <- i
     refits <- c(refits, i)
     fit_part <- update(
@@ -287,22 +319,29 @@ dat_elpd <- data.frame(
   approx_elpd = approx_elpds_4sap,
   exact_elpd = exact_elpds_4sap
 )
+
+outlier0.5 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.5)
+outlier0.25 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.25)
+
 ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
   geom_abline(color = "gray30") +
   geom_point(size = 2) +
+  geom_point(data = dat_elpd[outlier0.5, ], size = 3, color = "red3") +
   xlab("Approximate elpds") +
   ylab("Exact elpds")
 ```
+
+The `r outlier0.5`th observation(s) show a distance between exact and approximate elpd of more than $0.5$. The `r outlier0.25`th observation(s) show a distance between exact and approximate elpd of more than $0.25$.
 
 ## 1-step-ahead predictions leaving out blocks of future values
 
 ### Exact 1-step-ahead predictions
 
 ```{r exact_loglik_block, results="hide"}
-block <- 10
+B <- 10
 loglik <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 for (i in N:(L + 1)) {
-  to <- min(i + block - 1, N)
+  to <- min(i + B - 1, N)
   fit_i <- update(fit, newdata = df[-(i:to), ], recompile = FALSE, chains = 1)
   loglik[, i] <- log_lik(fit_i, newdata = df[1:i, ])[, i]
 }
@@ -323,12 +362,11 @@ i_refit <- N
 refits <- NULL
 for (i in N:(L + 1)) {
   loglik[, i] <- log_lik(fit_part)[, i]
-  to <- min(i + block - 1, i_refit)
+  to <- min(i + B - 1, i_refit)
   logr[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   if (any(psis_part$diagnostics$pareto_k > k_thres)) {
     # refit the model based on the first i observations
-    # could be improved by computing exact LOO for the ith observation
     i_refit <- i
     refits <- c(refits, i)
     fit_part <- update(
@@ -361,14 +399,19 @@ dat_elpd <- data.frame(
   approx_elpd = approx_elpds_1sap_block,
   exact_elpd = exact_elpds_1sap_block
 )
+
+outlier0.5 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.5)
+outlier0.25 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.25)
+
 ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
   geom_abline(color = "gray30") +
   geom_point(size = 2) +
+  geom_point(data = dat_elpd[outlier0.5, ], size = 3, color = "red3") +
   xlab("Approximate elpds") +
   ylab("Exact elpds")
 ```
 
-The `r which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.25)`th observation(s) show a distance between exact and approximate elpd of more than $0.25$.
+The `r outlier0.5`th observation(s) show a distance between exact and approximate elpd of more than $0.5$. The `r outlier0.25`th observation(s) show a distance between exact and approximate elpd of more than $0.25$.
 
 <br />
 
