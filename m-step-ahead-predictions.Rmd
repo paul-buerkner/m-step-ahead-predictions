@@ -98,14 +98,15 @@ plot(LakeHuron)
 The above plot shows rather strong autocorrelation of the time-series as well as some trend towards lower levels for later points in time. For model fitting, we turn the time-series into a data frame.
 
 ```{r}
+N <- length(LakeHuron)
 df <- data.frame(y = as.numeric(LakeHuron))
-df$time <- 1:nrow(df)
+df$time <- 1:N
 ```
 
 and then specify an AR(2) model on these data using the **brms** package.
 
 ```{r fit, results = "hide"}
-control <- list(adapt_delta = 0.99)
+control <- list(adapt_delta = 0.95)
 fit <- brm(
   y ~ 1, data = df, autocor = cor_ar(~time, p = 2), 
   control = control, seed = SEED
@@ -125,10 +126,16 @@ ggplot(pred, aes(time, Estimate)) +
   geom_point(aes(time, y), inherit.aes = FALSE)
 ```
 
+We will require at least $L = 10$ observations to make predictions.
+
+```{r}
+L <- 10
+```
+
 For the purpose of later comparison, we perform approximate leave-one-out cross-validation (LOO) as baseline whos accurarcy for 1-SAP we seek to improve.
 
 ```{r, cache = FALSE}
-LOO(fit)
+loo(log_lik(fit)[, (L+1):N])
 ```
 
 ## 1-step-ahead predictions leaving out all future values
@@ -136,17 +143,10 @@ LOO(fit)
 ### Exact 1-step-ahead predictions
 
 ```{r exact_loglik, results="hide"}
-N <- nrow(df)
-L <- 0
 loglik <- matrix(nrow = nsamples(fit), ncol = N)
 for (i in N:max(L + 1, 2)) {
   fit_i <- update(fit, newdata = df[-(i:N), ], recompile = FALSE, chains = 1)
   loglik[, i] <- log_lik(fit_i, newdata = df[1:i, ])[, i]
-}
-if (L == 0) {
-  # no prior observations for the first observation
-  fit_i <- update(fit, sample_prior = "only", recompile = FALSE, chains = 1)
-  loglik[, 1] <- log_lik(fit_i, newdata = df[1, ])[, 1]
 }
 ```
 
@@ -161,10 +161,6 @@ exact_elpds_1sap <- apply(loglik, 2, log_mean_exp)
 ```
 
 ### Approximate 1-step-ahead predictions
-
-```{r}
-k_thres <- 0.7
-```
 
 Compute approximate 1-SAP without refit:
 
@@ -183,6 +179,10 @@ plot(psis(logr[, !is_na]))
 
 Compute approximate 1-SAP with refit:
 
+```{r}
+k_thres <- 0.7
+```
+
 ```{r refit_loglik, results="hide"}
 loglik <- logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 approx_elpds_1sap <- rep(NA, nrow(df))
@@ -194,19 +194,20 @@ for (i in N:(L + 1)) {
   logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   if (any(psis_part$diagnostics$pareto_k > k_thres)) {
-    # refit the model based on the first i observations
+    # refit the model based on the first i-1 observations
     i_refit <- i
     refits <- c(refits, i)
     fit_part <- update(
-      fit_part, newdata = df[1:i, ], 
+      fit_part, newdata = df[1:(i-1), ], 
       recompile = FALSE, chains = 1
     )
-    loglik[, i] <- log_lik(fit_part)[, i]
+    loglik[, i] <- log_lik(fit_part, newdata = df[1:i, ])[, i]
     logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
-    psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+    approx_elpds_1sap[i] <- log_mean_exp(loglik[, i])
+  } else {
+    w_i <- exp(psis_part$log_weights[, 1])
+    approx_elpds_1sap[i] <- log(sum(exp(loglik[, i]) * w_i) / sum(w_i))
   }
-  w_i <- exp(psis_part$log_weights[, 1])
-  approx_elpds_1sap[i] <- log(sum(exp(loglik[, i]) * w_i) / sum(w_i))
 }
 ```
 
@@ -255,12 +256,6 @@ for (i in (N - m + 1):max(L + 1, 2)) {
   ll <- log_lik(fit_i, newdata = df[1:(i + m - 1), ])
   loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
 }
-if (L == 0) {
-  # no past observations for the first observation
-  fit_i <- update(fit, sample_prior = "only", recompile = FALSE, chains = 1)
-  ll <- log_lik(fit_i, newdata = df[1:m, ])
-  loglikm[, 1] <- rowSums(ll[, 1:m])
-}
 ```
 
 ```{r, cache = FALSE}
@@ -284,21 +279,22 @@ for (i in (N - m + 1):(L + 1)) {
   logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   if (any(psis_part$diagnostics$pareto_k > k_thres)) {
-    # refit the model based on the first i observations
+    # refit the model based on the first i-1 observations
     i_refit <- i
     refits <- c(refits, i)
     fit_part <- update(
-      fit_part, newdata = df[1:i, ], 
+      fit_part, newdata = df[1:(i-1), ], 
       recompile = FALSE, chains = 1
     )
     ll <- log_lik(fit_part, newdata = df[1:(i + m - 1), ])
-    loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
     loglik[, i] <- ll[, i]
+    loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
     logr[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
-    psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+    approx_elpds_4sap[i] <- log_mean_exp(loglikm[, i])
+  } else {
+    w_i <- exp(psis_part$log_weights[, 1])
+    approx_elpds_4sap[i] <- log(sum(exp(loglikm[, i]) * w_i) / sum(w_i))
   }
-  w_i <- exp(psis_part$log_weights[, 1])
-  approx_elpds_4sap[i] <- log(sum(exp(loglikm[, i]) * w_i) / sum(w_i))
 }
 ```
 
@@ -366,19 +362,20 @@ for (i in N:(L + 1)) {
   logr[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
   psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
   if (any(psis_part$diagnostics$pareto_k > k_thres)) {
-    # refit the model based on the first i observations
+    # refit the model without a block of B observations
     i_refit <- i
     refits <- c(refits, i)
     fit_part <- update(
-      fit_part, newdata = df[-((i + 1):to), ], 
+      fit_part, newdata = df[-(i:to), ], 
       recompile = FALSE, chains = 1
     )
-    loglik[, i] <- log_lik(fit_part)[, i]
+    loglik[, i] <- log_lik(fit_part, newdata = df[1:i, ])[, i]
     logr[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
-    psis_part <- suppressWarnings(psis(logr[, i:i_refit]))
+    approx_elpds_1sap_block[i] <- log_mean_exp(loglik[, i])
+  } else {
+    w_i <- exp(psis_part$log_weights[, 1])
+    approx_elpds_1sap_block[i] <- log(sum(exp(loglik[, i]) * w_i) / sum(w_i))
   }
-  w_i <- exp(psis_part$log_weights[, 1])
-  approx_elpds_1sap_block[i] <- log(sum(exp(loglik[, i]) * w_i) / sum(w_i))
 }
 ```
 
