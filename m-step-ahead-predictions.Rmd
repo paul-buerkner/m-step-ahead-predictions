@@ -31,52 +31,50 @@ set.seed(SEED)
 
 ## Introduction
 
-The idea of m-step-ahead predictions (m-SAP) for time-series models is to predict ($m$ steps) ahead using only past values of the time-series and no future values. Doing exact m-SAP requires repeatedly fitting the model for each set of m-steps to be predicted. This is usually very time-intensive in particular for Bayesian models and so we seek to approximate m-SAP using as few refits of the model as possible.
+The idea of m-step-ahead predictions (m-SAP) for time-series models is to predict $m$ observations ahead using only past observations of the time-series and no future observations. Doing exact m-SAP requires repeatedly fitting the model for each set of $m$ observations to be predicted. This is usually very time-intensive in particular for Bayesian models and so we seek to approximate m-SAP using as few refits of the model as possible.
 
-## 1-step-ahead predictions
+## m-step-ahead predictions
 
-Assume we have a time-series of observations $(y_1, y_2, ..., y_N)$, then the goal of 1-SAP is to compute the quantities $p(y_i | y_{1},...,y_{i-1}) = p(y_i | y_{<i})$ for all $i$ between $L + 1$ and $N$, where $L$ is the minimum number of values required to make predictions (e.g., $L = 10$ if we want to start with predicting the $11$th observation). The quantities $p(y_i | y_{<i})$ can be computed as follows with the help of the posterior distribution $p(\theta | y_{<i})$ of the parameters $\theta$ based on the $i-1$ earliest observations of the time-series:
+Assume we have a time-series of observations $(y_1, y_2, ..., y_N)$, then the goal of m-SAP is to compute the predictive density
 $$
-p(y_i | y_{<i}) = \int p(y_i\,|\,y_{<i}, \theta) \, p(\theta\,|\,y_{<i}) \,d\theta.
+p(y_{i<m} | y_{<i}) = p(y_i, ..., y_{i + m - 1} | y_{1},...,y_{i-1})
+$$ 
+for all $i$ between $L + 1$ and $N - m + 1$, where $L$ is the minimum number of values required to make predictions (e.g., $L = 10$ if we want to start with predicting the $11$th observation). The quantities $p(y_{i<m} | y_{<i})$ can be computed as follows with the help of the posterior distribution $p(\theta | y_{<i})$ of the parameters $\theta$ based on the $i-1$ earliest observations of the time-series:
 $$
-Having obtained $S$ random draws $\theta_{<i}^{(s)}$ ($s = 1,...,S$) of the posterior distribution $p(\theta\,|\,y_{<i})$, we can estimate $p(y_i | y_{<i})$ as follows:
+p(y_{i<m} \,| \, y_{<i}) = \int p(y_{i<m} \,| \, y_{<i}, \theta) \, p(\theta\,|\,y_{<i}) \,d\theta.
+$$
+Having obtained $S$ random draws $\theta_{<i}^{(s)}$ ($s = 1,...,S$) of the posterior distribution $p(\theta\,|\,y_{<i})$, we can estimate $p(y_i | y_{<i})$ by means of
 
 $$
- p(y_i\,|\,y_{<i}) \approx \sum_{s=1}^S p(y_i\,|\,y_{<i}, \theta_{<i}^{(s)}),
+p(y_{i<m} \,|\, y_{<i}) \approx \sum_{s=1}^S p(y_{i<m} \,|\, y_{<i}, \theta_{<i}^{(s)}).
 $$
+
 In the following, we consider factorized models in which the response values are conditionally independent given the parameters and the likelihood
 can be written in the familiar form
 
 $$
 p(y \,|\, \theta) = \prod_{i=1}^N p(y_i \,|\, \theta).
 $$
-In this case, $p(y_i\,|\, y_{<i}, \theta_{<i})$ reduces to $p(y_i\,|\, \theta_{<i})$.
+In this case, $p(y_{i<m} \,|\, y_{<i}, \theta_{<i})$ reduces to $\prod_{j = i}^{i + m -1} p(y_j \,|\, \theta_{<i})$.
 
-## Approximate 1-SAP using integrated importance-sampling
+## Approximate m-SAP using integrated importance-sampling
 
-TODO: directly define m-SAP.
-
-To reduce the number of models that need to be fitted for the purpose of obtaining $p(y_i\,|\,y_{<i})$, we propose the following algorithm. Starting with the last observation (i.e. $i = N$), we compute $p(y_i\,|\,y_{<i})$ with approximate leave-one-out cross-validation (LOO-CV) using integrated importance sampling (Vehtari et al., 2016, Section 3.6.1):
+To reduce the number of models that need to be fitted for the purpose of obtaining $p(y_{i<m} \,|\, y_{<i})$, we propose the following algorithm. Starting at the end of the time-series (i.e. $i = N - m + 1$), we compute $p(y_{i<m} \,|\, y_{<i})$ with approximate leave-m-out cross-validation using integrated importance sampling (Vehtari et al., 2016, Section 3.6.1):
 
 $$
- p(y_i\,|\,y_{<i}) \approx
-   \frac{ \sum_{s=1}^S p(y_i\,|\, \theta^{(s)}) \,w_i^{(s)}}{ \sum_{s=1}^S w_i^{(s)}},
+ p(y_{i<m} \,|\, y_{<i}) \approx
+   \frac{ \sum_{s=1}^S p(y_{i<m} \,|\, \theta^{(s)}) \, w_i^{(s)}}{ \sum_{s=1}^S w_i^{(s)}},
 $$
 
-where $w_i^{(s)}$ are importance weights and $\theta^{(s)}$ are draws from the posterior distribution based on all observations. To obtain $w_N^{(s)}$ for the last observation $N$, we first compute the raw importance ratios
-
-$$
-r_N^{(s)} \propto \frac{1}{p(y_N \,|\, \,\theta^{(s)})},
-$$
-
-and then stabilize them using Pareto smoothed importance sampling (PSIS, Vehtari et al, 2017ab). We then gradually decrease $i$ by $1$ and compute the raw importance ratios as
+where $w_i^{(s)}$ are importance weights and $\theta^{(s)}$ are draws from the posterior distribution based on all observations. To obtain $w_i^{(s)}$, we first compute the raw importance ratios
 
 $$
 r_i^{(s)} \propto \frac{1}{\prod_{j = i}^N p(y_j \,|\, \,\theta^{(s)})}
 $$
-and again stabilize them using PSIS to obtain $w_i^{(s)}$. At some observation $i$, the variability in $r_i^{(s)}$ will become too large to that the PSIS approximation will fail (Pareto-k-values greater than $0.7$). Then we refit the model using only observations up to the $i$th one and restart the process until we arrived at the $L+1$th observation, where $L$ is the minimum sample size required to make predictions ($L=0$ if predictions of all observations should be computed).
 
-Depending on the particular time-series model and data, the Pareto-k-values will exceed $0.7$ rather quickly (i.e. after only few observations) and thus many refits may be required even if applying the above described algorithm. In this case, an option is to exclude only a number of $B$ future values which directly follow the observations to be predicted while keeping all more distant future values $B+1$ to $N$. This will usually result in lower Pareto-k-values and thus less refitting. The block-m-SAP resembles the basic m-SAP closely only if values in the distant future (that is farer away than $B$ steps) contain little information about the current observations being predicted. Whether this assumption is justified depends on the data and applied time-series model.
+and then stabilize them using Pareto smoothed importance sampling (PSIS, Vehtari et al, 2017ab). We then gradually decrease $i$ by $1$ and repeat the process. At some observation $i$, the variability in $r_i^{(s)}$ will become too large to that the PSIS approximation will fail (Pareto-k-estimates greater than $0.7$). Then we refit the model using only observations up to the $i$th one and restart the process until we arrived at the $L+1$th observation, where $L$ is the minimum sample size required to make predictions ($L=0$ if predictions of all observations should be computed).
+
+Depending on the particular time-series model and data, the Pareto-k-estimates will exceed $0.7$ rather quickly (i.e. after only few observations) and thus many refits may be required even if applying the above described algorithm. In this case, an option is to exclude only a number of $B$ future values which directly follow the observations to be predicted while keeping all more distant future values $B+1$ to $N$. This will usually result in lower Pareto-k-estimates and thus less refitting. The block-m-SAP resembles the basic m-SAP closely only if values in the distant future (that is farer away than $B$ steps) contain little information about the current observations being predicted. Whether this assumption is justified depends on the data and applied time-series model.
 
 ## Autoregressive models
 
@@ -87,7 +85,7 @@ Y_i = \eta_i + \sum_{k = 1}^p \varphi_k Y_{i - k} + \varepsilon_i,
 $$
 where $\eta_i$ is the linear predictor of observation $i$, $\phi_k$ are the autoregressive parameters and $\varepsilon_i$ are pairwise independent errors, which are usually assumed to be normally distributed with equal variance $\sigma^2$. The model implies a recursive formula that allows to compute the right-hand side of the above equation for observation $i$ based on the equations' solution for all past observations $1$ to $i-1$.
 
-Case Study: Annual measurements of the level of Lake Huron
+## Case Study: Annual measurements of the level of Lake Huron
 
 To illustrate the application of m-SAP, we will use the annual measurements of the level (in feet) of Lake Huron 1875–1972 as a case study, which is shipped natively with **R**.
 
@@ -126,13 +124,13 @@ ggplot(pred, aes(time, Estimate)) +
   geom_point(aes(time, y), inherit.aes = FALSE)
 ```
 
-We will require at least $L = 10$ observations to make predictions.
+To allow for reasonable predictions of future values, we will require at least $L = 15$ observations to make predictions.
 
 ```{r}
-L <- 10
+L <- 15
 ```
 
-For the purpose of later comparison, we perform approximate leave-one-out cross-validation (LOO) as baseline whos accurarcy for 1-SAP we seek to improve.
+we perform approximate leave-one-out cross-validation (LOO-CV), for the purpose of later comparison with exact and approximate 1-SAP.
 
 ```{r, cache = FALSE}
 loo(log_lik(fit)[, (L+1):N])
@@ -140,7 +138,11 @@ loo(log_lik(fit)[, (L+1):N])
 
 ## 1-step-ahead predictions leaving out all future values
 
+The most basic version of m-SAP is 1-SAP in which we predict only one step ahead. In this case, $y_{i<m}$ simplifies to $y_{i}$ and the above described algorithm becomes considerably simpler.
+
 ### Exact 1-step-ahead predictions
+
+As a benchmark to approximate 1-SAP, we are going to compute exact 1-SAP, by first computing the exact log-likelihood values
 
 ```{r exact_loglik, results="hide"}
 loglik <- matrix(nrow = nsamples(fit), ncol = N)
@@ -149,6 +151,8 @@ for (i in N:max(L + 1, 2)) {
   loglik[, i] <- log_lik(fit_i, newdata = df[1:i, ])[, i]
 }
 ```
+
+and then compute the exact expected log predictive density (elpd) on that basis.
 
 ```{r, cache = FALSE}
 log_mean_exp <- function(x) {
@@ -162,26 +166,41 @@ exact_elpds_1sap <- apply(loglik, 2, log_mean_exp)
 
 ### Approximate 1-step-ahead predictions
 
-Compute approximate 1-SAP without refit:
+For illustrationary purposes, we first compute approximate 1-SAP without refitting. This will of course be a poor approximation of exact 1-SAP in particular if the Pareto-k-estimates increase rather quickly beyond the threshold of $0.7$ up the which PSIS tends to produce stable results.
 
 ```{r loglik}
+approx_elpds_1sap_no_refit <- rep(NA, nrow(df))
 loglik <- log_lik(fit)
 logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
 for (i in N:(L + 1)) {
   logr[, i] <- - rowSums(loglik[, i:N, drop = FALSE])
+  psis_part <- suppressWarnings(psis(logr[, i:N]))
+  w_i <- exp(psis_part$log_weights[, 1])
+  approx_elpds_1sap_no_refit[i] <- 
+    log(sum(exp(loglik[, i]) * w_i) / sum(w_i))
 }
 ```
+
+The plot below indicates that indeed the Pareto-k-estimates go over the roof when not refitting the model at some point.
 
 ```{r, cache = FALSE}
 is_na <- apply(logr, 2, anyNA)
 plot(psis(logr[, !is_na]))
 ```
 
-Compute approximate 1-SAP with refit:
+Consequently, it is not surprising that the resulting approximate elpd is far away for the exact elpd.
+
+```{r, cache = FALSE}
+(approx_elpd_1sap_no_refit <- sum(approx_elpds_1sap_no_refit, na.rm = TRUE))
+```
+
+Next, we compute approximate 1-SAP with refit at observations where Pareto-k-estimates exceed the threshold of $0.7$.
 
 ```{r}
 k_thres <- 0.7
 ```
+
+The code becomes a little bit more involved to handle the refitting procedure. Note that we compute exact 1-SAP at the refitting points. This comes with no additional computational costs since we had to refit the model anyway. 
 
 ```{r refit_loglik, results="hide"}
 loglik <- logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
@@ -211,17 +230,20 @@ for (i in N:(L + 1)) {
 }
 ```
 
+We see that the final Pareto-k-estimates are mostly well below the threshold and that we only needed to refit the model `r length(refits)` times at observations `r refits`.
+
 ```{r, cache = FALSE}
-print(refits)
 is_na <- apply(logr, 2, anyNA)
 plot(psis(logr[, !is_na]))
 ```
+
+The approximate elpd is remarkably similar to the exact elpd compute above, which indicates our algorithm to compute approximate 1-SAP worked well for the present data and model.
 
 ```{r, cache = FALSE}
 (approx_elpd_1sap <- sum(approx_elpds_1sap, na.rm = TRUE))
 ```
 
-Plotting exact against approximate predictions:
+Plotting exact against approximate predictions, we see that no approximation value deviates far from its exact counterpart providing further evidence for the goodness of our approximation.
 
 ```{r, cache = FALSE}
 dat_elpd <- data.frame(
@@ -240,13 +262,15 @@ ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
   ylab("Exact elpds") 
 ```
 
-The `r outlier0.5`th observation(s) show a distance between exact and approximate elpd of more than $0.5$. The `r outlier0.25`th observation(s) show a distance between exact and approximate elpd of more than $0.25$.
+No observation shows a distance between exact and approximate elpd of more than $0.5$. The `r outlier0.25`th observations show a distance between exact and approximate elpd of more than $0.25$, which has little influence on the overall elpd.
 
 ## m-step-ahead predictions leaving out all future values
 
-Using 4-step-ahead predictions as example.
+To illustrate the application of m-SAP if $m > 1$, we compute exact and approximate 4-SAP and on the AR(2) model fitted to the Lake Huron data.
 
 ### Exact m-step-ahead predictions
+
+The necessary steps are the same as for 1-SAP with the exception that the log-likelihood values of interest are now the sums of the log-likelihood values of four consequtive observations.
 
 ```{r exact_loglikm, results="hide"}
 m <- 4
@@ -264,6 +288,8 @@ exact_elpds_4sap <- apply(loglikm, 2, log_mean_exp)
 ```
 
 ### Approximate m-step-ahead predictions
+
+Similar to the exact 4-SAP, computing the approximate 4-SAP is a little bit more involved than the 1-SAP counterpart although the principle idea as well as the applied importance weights remain the same.
 
 ```{r refit_loglikm, results="hide"}
 loglikm <- loglik <- logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
@@ -298,17 +324,20 @@ for (i in (N - m + 1):(L + 1)) {
 }
 ```
 
+Again, we see that the final Pareto-k-estimates are mostly well below the threshold and that we only needed to refit the model `r length(refits)` times at observations `r refits`.
+
 ```{r, cache = FALSE}
-print(refits)
 is_na <- apply(logr, 2, anyNA)
 plot(psis(logr[, !is_na]))
 ```
+
+Similar to 1-SAP, the approximate 4-SAP is very close to the exact counterpart.
 
 ```{r, cache = FALSE}
 (approx_elpd_4sap <- sum(approx_elpds_4sap, na.rm = TRUE))
 ```
 
-Plotting exact against approximate predictions:
+Plotting exact against approximate pointwise predictions confirms this result.
 
 ```{r, cache = FALSE}
 dat_elpd <- data.frame(
@@ -316,22 +345,24 @@ dat_elpd <- data.frame(
   exact_elpd = exact_elpds_4sap
 )
 
-outlier0.5 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.5)
-outlier0.25 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.25)
+outlier2 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 2)
+outlier1 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 1)
 
 ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
   geom_abline(color = "gray30") +
   geom_point(size = 2) +
-  geom_point(data = dat_elpd[outlier0.5, ], size = 3, color = "red3") +
+  geom_point(data = dat_elpd[outlier2, ], size = 3, color = "red3") +
   xlab("Approximate elpds") +
   ylab("Exact elpds")
 ```
 
-The `r outlier0.5`th observation(s) show a distance between exact and approximate elpd of more than $0.5$. The `r outlier0.25`th observation(s) show a distance between exact and approximate elpd of more than $0.25$.
-
 ## 1-step-ahead predictions leaving out blocks of future values
 
+Lastly, we are going to illustrate 1-SAP when only leaving out a block of $B$ future observations while keeping more distant future observations (abbreviated as block-1-SAP). This will decrease Pareto-k-estimates on average, but it only a valid approximation of exact 1-SAP if distant futrue values contain little information about the currently left-out observation. 
+
 ### Exact 1-step-ahead predictions
+
+The related code changes little with the exception that we now define a block size of left-out observations, which we set to $B = 10$ for the present case study.
 
 ```{r exact_loglik_block, results="hide"}
 B <- 10
@@ -343,12 +374,16 @@ for (i in N:(L + 1)) {
 }
 ```
 
+Comparing the exact block-1-SAP to the exact 1-SAP reveals substantial differences demonstrating that the assumption about distant future values containing no additional information is probably not justified in the present case.
+
 ```{r, cache = FALSE}
 exact_elpds_1sap_block <- apply(loglik, 2, log_mean_exp)
 (exact_elpd_1sap_block <- sum(exact_elpds_1sap_block, na.rm = TRUE))
 ```
 
 ### Approximate 1-step-ahead predictions
+
+We compute approximate block-1-SAP as follows.
 
 ```{r refit_loglik_block, results="hide"}
 loglik <- logr <- matrix(nrow = nsamples(fit), ncol = nrow(df))
@@ -379,17 +414,20 @@ for (i in N:(L + 1)) {
 }
 ```
 
+We needed only a single refit at observation `r refits`, which is remarkable given that we deal with a time-series of 98 observations in total of which we predicted `r 98 - L` observations. 
+
 ```{r, cache = FALSE}
-print(refits)
 is_na <- apply(logr, 2, anyNA)
 plot(psis(logr[, !is_na]))
 ```
+
+Consequently, it is not surprising that approximate block-1-SAP matches the exact counterpart closely.
 
 ```{r, cache = FALSE}
 (approx_elpd_1sap_block <- sum(approx_elpds_1sap_block, na.rm = TRUE))
 ```
 
-Plotting exact against approximate predictions:
+This is also visible in the plot of approximate against exact predictions.
 
 ```{r, cache = FALSE}
 dat_elpd <- data.frame(
@@ -408,7 +446,9 @@ ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
   ylab("Exact elpds")
 ```
 
-The `r outlier0.5`th observation(s) show a distance between exact and approximate elpd of more than $0.5$. The `r outlier0.25`th observation(s) show a distance between exact and approximate elpd of more than $0.25$.
+## Conclusion
+
+In the present case study, we have shown how to approximate m-step-ahead predictions in time-series models by means of Pareto-smoothed importance-sampling using as few refits of the model as possible. At least for the present data and model, our algorithm provides reasonably stable and accurate results depite requiring very few refits.
 
 <br />
 
