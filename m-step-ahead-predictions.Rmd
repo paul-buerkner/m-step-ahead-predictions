@@ -381,6 +381,18 @@ exact_elpds_1sap_block <- apply(loglik, 2, log_mean_exp)
 (exact_elpd_1sap_block <- sum(exact_elpds_1sap_block, na.rm = TRUE))
 ```
 
+```{r, cache = FALSE}
+dat_elpd <- data.frame(
+  elpd_diff = exact_elpds_1sap_block - exact_elpds_1sap,
+  i = seq_along(exact_elpds_1sap_block)
+)
+
+ggplot(dat_elpd, aes(x = i, y = elpd_diff)) +
+  geom_point(size = 2) +
+  xlab("Data Point") +
+  ylab("Difference of exact elpds")
+```
+
 ### Approximate 1-step-ahead predictions
 
 We compute approximate block-1-SAP as follows.
