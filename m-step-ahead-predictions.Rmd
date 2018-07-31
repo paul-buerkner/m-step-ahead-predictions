@@ -1,6 +1,6 @@
 ---
 title: "PSIS assisted m-step-ahead predictions for time-series models"
-author: Paul Buerkner, Aki Vehtari
+author: Paul Buerkner, Aki Vehtari, Jonah Gabry
 output:
   html_document: default
   pdf_document: default
