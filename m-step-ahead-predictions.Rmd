@@ -180,12 +180,19 @@ computed).
 
 ## Autoregressive models
 
-Autoregressive (AR) models are one of the classic time-series models. An AR-model of order $p$ can be defined as
+Autoregressive (AR) models are some of the most commonly used time-series
+models. An AR-model of order $p$ can be defined as
 
 $$
-Y_i = \eta_i + \sum_{k = 1}^p \varphi_k Y_{i - k} + \varepsilon_i,
+y_i = \eta_i + \sum_{k = 1}^p \varphi_k y_{i - k} + \varepsilon_i,
 $$
-where $\eta_i$ is the linear predictor of observation $i$, $\phi_k$ are the autoregressive parameters and $\varepsilon_i$ are pairwise independent errors, which are usually assumed to be normally distributed with equal variance $\sigma^2$. The model implies a recursive formula that allows to compute the right-hand side of the above equation for observation $i$ based on the equations' solution for all past observations $1$ to $i-1$.
+
+where $\eta_i$ is the linear predictor for the $i$th observation, $\phi_k$ are
+the autoregressive parameters and $\varepsilon_i$ are pairwise independent
+errors, which are usually assumed to be normally distributed with equal variance
+$\sigma^2$. The model implies a recursive formula that allows for computing the
+right-hand side of the above equation for observation $i$ based on the values of
+the equations for previous observations.
 
 ## Case Study: Annual measurements of the level of Lake Huron
 
