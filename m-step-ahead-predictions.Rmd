@@ -87,7 +87,7 @@ more realistic applications than previously possible.
 
 
 
-## M-step-ahead predictions
+## $M$-step-ahead predictions
 
 Assume we have a time series of observations 
 $\mathbf{y} = (y_1, y_2, \ldots, y_N)$ 
@@ -444,48 +444,48 @@ rbind(
 ```
 
 Plotting exact against approximate predictions, we see that no approximation
-value deviates far from its exact counterpart providing further evidence for the
-good quality of our approximation.
+value deviates far from its exact counterpart, providing further evidence for
+the good quality of our approximation.
 
 ```{r, cache = FALSE}
 dat_elpd <- data.frame(
   approx_elpd = approx_elpds_1sap,
   exact_elpd = exact_elpds_1sap
 )
-xy_lim <- range(dat_elpd, na.rm=TRUE)
 
 ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
   geom_abline(color = "gray30") +
   geom_point(size = 2) +
-  labs(x = "Approximate ELPDs", y = "Exact ELPDs") +
-  lims(x = xy_lim, y = xy_lim)
+  labs(x = "Approximate ELPDs", y = "Exact ELPDs")
 ```
 
-```{r, include=FALSE}
+```{r, echo=FALSE}
 max_diff <- max(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd))
 mean_diff <- mean(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd))
 ```
 
 No observation shows a difference between the exact and approximate ELPD
-calculations of more than $`r round(max_diff, 2)$ and the average difference is
+calculations of more than `r round(max_diff, 2)` and the average difference is
 `r round(mean_diff, 3)`, resulting in a close approximation.
 
-## m-step-ahead predictions leaving out all future values
+## $M$-step-ahead predictions leaving out all future values
 
-To illustrate the application of $M$-SAP if $m > 1$, we compute exact and
-approximate 4-SAP for the same AR(2) model we fit to the Lake Huron data.
+To illustrate the application of $M$-SAP for $M > 1$, we compute next exact and
+approximate LFO-CV for the 4-SAP case.
 
-### Exact m-step-ahead predictions
+### Exact $M$-step-ahead predictions
 
-The necessary steps are the same as for 1-SAP with the exception that the log-likelihood values of interest are now the sums of the log-likelihood values of four consequtive observations.
+The necessary steps are the same as for 1-SAP with the exception that the 
+log-density values of interest are now the sums of the log predictive 
+densities of four consequtive observations.
 
 ```{r exact_loglikm, results="hide"}
-m <- 4
+M <- 4
 loglikm <- matrix(nrow = nsamples(fit), ncol = N)
-for (i in (N - m + 1):max(L + 1, 2)) {
+for (i in (N - M + 1):max(L + 1, 2)) {
   fit_i <- update(fit, newdata = df[-(i:N), ], recompile = FALSE, chains = 1)
-  ll <- log_lik(fit_i, newdata = df[1:(i + m - 1), ])
-  loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
+  ll <- log_lik(fit_i, newdata = df[1:(i + M - 1), ])
+  loglikm[, i] <- rowSums(ll[, i:(i + M - 1)])
 }
 ```
 
@@ -494,20 +494,22 @@ exact_elpds_4sap <- apply(loglikm, 2, log_mean_exp)
 (exact_elpd_4sap <- c(ELPD = sum(exact_elpds_4sap, na.rm = TRUE)))
 ```
 
-### Approximate m-step-ahead predictions
+### Approximate $M$-step-ahead predictions
 
-Similar to the exact 4-SAP, computing the approximate 4-SAP is a little bit more involved than the 1-SAP counterpart although the principle idea as well as the applied importance weights remain the same.
+Computing the approximate PSIS-LFO-CV for the 4-SAP case is a little bit more
+involved than the approximate version for the 1-SAP case, although the
+underlying principles remain the same.
 
 ```{r refit_loglikm, results="hide"}
 loglikm <- loglik <- logratio <- matrix(nrow = nsamples(fit), ncol = N)
 approx_elpds_4sap <- rep(NA, N)
 fit_part <- fit
-i_refit <- N-m+1
+i_refit <- N - M + 1
 refits <- NULL
-loglik[, (N - m + 2):N] <- log_lik(fit_part)[, (N - m + 2):N]
-for (i in (N - m + 1):(L + 1)) {
-  ll <- log_lik(fit_part, newdata = df[1:(i + m - 1), ])
-  loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
+loglik[, (N - M + 2):N] <- log_lik(fit_part)[, (N - M + 2):N]
+for (i in (N - M + 1):(L + 1)) {
+  ll <- log_lik(fit_part, newdata = df[1:(i + M - 1), ])
+  loglikm[, i] <- rowSums(ll[, i:(i + M - 1)])
   loglik[, i] <- ll[, i]
   logratio[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
   psis_part <- psis(logratio[, i:i_refit], r_eff = NA)
@@ -519,9 +521,9 @@ for (i in (N - m + 1):(L + 1)) {
       fit_part, newdata = df[1:(i-1), ], 
       recompile = FALSE, chains = 1
     )
-    ll <- log_lik(fit_part, newdata = df[1:(i + m - 1), ])
+    ll <- log_lik(fit_part, newdata = df[1:(i + M - 1), ])
     loglik[, i] <- ll[, i]
-    loglikm[, i] <- rowSums(ll[, i:(i + m - 1)])
+    loglikm[, i] <- rowSums(ll[, i:(i + M - 1)])
     logratio[, i] <- - rowSums(loglik[, i:i_refit, drop = FALSE])
     approx_elpds_4sap[i] <- log_mean_exp(loglikm[, i])
   } else {
@@ -531,14 +533,16 @@ for (i in (N - m + 1):(L + 1)) {
 }
 ```
 
-Again, we see that the final Pareto-$k$-estimates are mostly well below the threshold and that we only needed to refit the model `r length(refits)` times at observations `r refits`.
+Again, we see that the final Pareto-$k$-estimates are mostly well below the
+threshold and that we only needed to refit the model `r length(refits)` times at
+observations `r refits`.
 
 ```{r, cache = FALSE}
-is_na <- apply(logratio, 2, anyNA)
-plot(psis(logratio[, !is_na], r_eff = NA))
+plot(psis(logratio[, (L+1):N], r_eff = NA))
 ```
 
-Similar to 1-SAP, the approximate 4-SAP is very close to the exact counterpart.
+Similar to the 1-SAP case, the approximate ELPD computed for the 4-SAP case 
+is very close to its exact counterpart.
 
 ```{r, cache = FALSE}
 approx_elpd_4sap <- sum(approx_elpds_4sap, na.rm = TRUE)
@@ -555,22 +559,37 @@ dat_elpd_4sap <- data.frame(
   approx_elpd = approx_elpds_4sap,
   exact_elpd = exact_elpds_4sap
 )
-xy_lim <- range(dat_elpd_4sap, na.rm=TRUE)
 
 ggplot(dat_elpd_4sap, aes(x = approx_elpd, y = exact_elpd)) +
   geom_abline(color = "gray30") +
   geom_point(size = 2) +
-  labs(x = "Approximate ELPDs", y = "Exact ELPDs") +
-  lims(x = xy_lim, y = xy_lim)
+  labs(x = "Approximate ELPDs", y = "Exact ELPDs")
 ```
+
 
 ## 1-step-ahead predictions leaving out blocks of future values
 
-Depending on the particular time-series model and data, the Pareto-$k$-estimates will exceed $0.7$ rather quickly (i.e. after only few observations) and thus many refits may be required even if applying the above described algorithm. In this case, an option is to exclude only a number of $B$ future values which directly follow the observations to be predicted while keeping all more distant future values $B+1$ to $N$. This will usually result in lower Pareto-$k$-estimates and thus less refitting. The block-$M$-SAP resembles the basic $M$-SAP closely only if values in the distant future (that is further away than $B$ steps) contain little information about the current observations being predicted. Whether this assumption is justified depends on the data and applied time-series model. We are going to illustrate this approach using block-1-SAP.
+Depending on the particular time-series model and data, the Pareto $k$ estimates
+may exceed $0.7$ rather quickly (i.e., after only few observations) and so
+many refits may be required even when carrying out the PSIS approximation
+to LFO-CV. In this case, another option is to exclude only the block of $B$ 
+future values that directly follow the observations to be predicted while 
+retaining all of the more distant values $\yy{>B} = (y_{B+1}, \ldots, y_N)$. 
+This will usually result in lower Pareto $k$ estimates and thus less refitting. 
 
-### Exact 1-step-ahead predictions
+This block-$M$-SAP version closely resembles the basic $M$-SAP only if values in
+the distant future, $\yy{>B}$, contain little information about the current
+observations being predicted. Whether this assumption is justified will depend
+on the data and model.
 
-The related code changes little with the exception that we now define a block size $B$ of left-out observations, which we set to $B = 10$ for the present case study.
+We will demonstrate the LFO-CV approach for the block-$M$-SAP case using
+block-1-SAP.
+
+### Exact LFO-CV for block-1-SAP
+
+The differences between the code for LFO-CV for 1-SAP and the codfe for
+block-1-SAP are very small. We now just need to define a block size $B$ of
+left-out observations, which we set to $B = 10$ for the present case study.
 
 ```{r exact_loglik_block, results="hide"}
 B <- 10
@@ -582,30 +601,41 @@ for (i in N:(L + 1)) {
 }
 ```
 
-Comparing the exact block-1-SAP to the exact 1-SAP reveals a substantial difference. 
+Comparing the exact block-1-SAP to the exact 1-SAP reveals a substantial
+difference:
 
 ```{r, cache = FALSE}
 exact_elpds_1sap_block <- apply(loglik, 2, log_mean_exp)
-(exact_elpd_1sap_block <- sum(exact_elpds_1sap_block, na.rm = TRUE))
+exact_elpd_1sap_block <- c(ELPD = sum(exact_elpds_1sap_block, na.rm = TRUE))
+rbind(
+  "Exact LFO-CV (1-SAP)" = exact_elpd_1sap, 
+  "Exact LFO-CV (block-1-SAP)" = exact_elpd_1sap_block 
+)
 ```
 
-This does, however, not necessarily imply that observations depend on distant future values. Rather, the reason could be that the model parameters were estimated more precisely in the block-1-SAP as more data are available in particular for computing 1-SAP of observations early in the time-series. If so, we would expect the differences between pointwise ELPDs of block-1-SAP and 1-SAP to be larger for earlier observations. And indeed, this is what we see when plotting the differences.
+This does not necessarily imply that observations depend on distant future values,
+but could instead be due to the fact that the model parameters were estimated 
+more precisely in the case of block-1-SAP since more data are available, 
+in particular for predicting observations early in the time series. 
+If this is the case we would expect the differences between the pointwise 
+ELPDs for the two cases to be larger for earlier observations. Indeed, this is
+what we see when plotting the differences:
 
 ```{r, cache = FALSE}
-dat_elpd <- data.frame(
+dat_elpd_diff <- data.frame(
   elpd_diff = exact_elpds_1sap_block - exact_elpds_1sap,
   i = seq_along(exact_elpds_1sap_block)
 )
 
-ggplot(dat_elpd, aes(x = i, y = elpd_diff)) +
+ggplot(dat_elpd_diff[(L+1):N, ], aes(x = i, y = elpd_diff)) +
   geom_point(size = 2) +
-  xlab("Data Point") +
-  ylab("Difference of exact elpds")
+  labs(x = "Data Point", y = "ELPD diff")
 ```
+
 
 ### Approximate 1-step-ahead predictions
 
-We compute approximate block-1-SAP as follows.
+We compute approximate PSIS-LFO-CV for block-1-SAP as follows.
 
 ```{r refit_loglik_block, results="hide"}
 loglik <- logratio <- matrix(nrow = nsamples(fit), ncol = N)
@@ -618,7 +648,7 @@ for (i in N:(L + 1)) {
   to <- min(i + B - 1, i_refit)
   logratio[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
   psis_part <- psis(logratio[, i:i_refit], r_eff = NA)
-  if (any(psis_part$diagnostics$pareto_k > k_thres)) {
+  if (any(pareto_k_values(psis_part) > k_thres)) {
     # refit the model without a block of B observations
     i_refit <- i
     refits <- c(refits, i)
@@ -630,47 +660,54 @@ for (i in N:(L + 1)) {
     logratio[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
     approx_elpds_1sap_block[i] <- log_mean_exp(loglik[, i])
   } else {
-    w_i <- exp(psis_part$log_weights[, 1])
+    w_i <- weights(psis_part, log = FALSE)[, 1]
     approx_elpds_1sap_block[i] <- log(sum(exp(loglik[, i]) * w_i) / sum(w_i))
   }
 }
 ```
 
-We needed only a single refit at observation `r refits`, which is remarkable given that we deal with a time-series of 98 observations in total of which we predicted `r 98 - L` observations. 
+We needed only a single refit at observation `r refits`, which is remarkable
+given that we have a time-series of 98 observations and are predicting
+for $98-L = $`r 98 - L` of them.
 
 ```{r, cache = FALSE}
-is_na <- apply(logratio, 2, anyNA)
-plot(psis(logratio[, !is_na], r_eff = NA))
+plot(psis(logratio[, (L+1):N], r_eff = NA))
 ```
 
-Consequently, it is not surprising that approximate block-1-SAP matches the exact counterpart closely.
+Consequently, it is not surprising that PSIS-LFO-CV for block-1-SAP matches the
+exact version closely.
 
 ```{r, cache = FALSE}
-(approx_elpd_1sap_block <- sum(approx_elpds_1sap_block, na.rm = TRUE))
+approx_elpd_1sap_block <- c(ELPD = sum(approx_elpds_1sap_block, na.rm = TRUE))
+rbind(
+  "Exact LFO-CV (block-1-SAP)" = exact_elpd_1sap_block,
+  "Approx LFO-CV (block-1-SAP)" = approx_elpd_1sap_block
+)
 ```
 
 This is also visible in the plot of approximate against exact predictions.
 
 ```{r, cache = FALSE}
-dat_elpd <- data.frame(
+dat_elpd_block <- data.frame(
   approx_elpd = approx_elpds_1sap_block,
   exact_elpd = exact_elpds_1sap_block
 )
 
-outlier0.5 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.5)
-outlier0.25 <- which(abs(dat_elpd$approx_elpd - dat_elpd$exact_elpd) > 0.25)
-
-ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
+ggplot(dat_elpd_block, aes(x = approx_elpd, y = exact_elpd)) +
   geom_abline(color = "gray30") +
   geom_point(size = 2) +
-  geom_point(data = dat_elpd[outlier0.5, ], size = 3, color = "red3") +
-  xlab("Approximate ELPDs") +
-  ylab("Exact ELPDs")
+  labs(x = "Approximate ELPDs", y = "Exact ELPDs")
 ```
 
 ## Conclusion
 
-In the present case study, we have shown how to approximate m-step-ahead predictions in time-series models by means of Pareto-smoothed importance-sampling using as few refits of the model as possible. At least for the present data and model, our algorithm provides reasonably stable and accurate results depite requiring very few refits.
+In this case study we have shown how to do carry out exact and approximate
+leave-future-out cross-validation for $M$-step-ahead prediction tasks. For the
+data and model used in our example the PSIS-LFO-CV algorithm provides reasonably
+stable and accurate results depite not requiring us to refit the model nearly as
+many times. For many other examples we expect similar performance, but the
+results will always vary from case to case depending on the particulars of the
+data and the time series model.
 
 <br />
 
