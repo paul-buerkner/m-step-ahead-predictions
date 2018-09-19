@@ -587,7 +587,7 @@ block-1-SAP.
 
 ### Exact LFO-CV for block-1-SAP
 
-The differences between the code for LFO-CV for 1-SAP and the codfe for
+The differences between the code for LFO-CV for 1-SAP and the code for
 block-1-SAP are very small. We now just need to define a block size $B$ of
 left-out observations, which we set to $B = 10$ for the present case study.
 
@@ -657,7 +657,7 @@ for (i in N:(L + 1)) {
       recompile = FALSE, chains = 1
     )
     loglik[, i] <- log_lik(fit_part, newdata = df[1:i, ])[, i]
-    logratio[, i] <- - rowSums(loglik[, i:to, drop = FALSE])
+    logratio[, i] <- -rowSums(loglik[, i:to, drop = FALSE])
     approx_elpds_1sap_block[i] <- log_mean_exp(loglik[, i])
   } else {
     w_i <- weights(psis_part, log = FALSE)[, 1]
@@ -668,7 +668,7 @@ for (i in N:(L + 1)) {
 
 We needed only a single refit at observation `r refits`, which is remarkable
 given that we have a time-series of 98 observations and are predicting
-for $98-L = $`r 98 - L` of them.
+for $98-L = $ `r 98 - L` of them.
 
 ```{r, cache = FALSE}
 plot(psis(logratio[, (L+1):N], r_eff = NA))
