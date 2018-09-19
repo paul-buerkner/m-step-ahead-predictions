@@ -538,7 +538,7 @@ threshold and that we only needed to refit the model `r length(refits)` times at
 observations `r refits`.
 
 ```{r, cache = FALSE}
-plot(psis(logratio[, (L+1):N], r_eff = NA))
+plot(psis(logratio[, (L+1):(N - M + 1)], r_eff = NA))
 ```
 
 Similar to the 1-SAP case, the approximate ELPD computed for the 4-SAP case 
@@ -729,5 +729,5 @@ sessionInfo()
 
 ### Appendix: Licenses
 
-* Code &copy; 2018, Paul Buerkner, Aki Vehtari, Jonah Gabry licensed under BSD-3.
-* Text &copy; 2018, Paul Buerkner, Aki Vehtari, Jonah Gabry licensed under CC-BY-NC 4.0.
+* Code &copy; 2018, Paul Buerkner, Aki Vehtari, Jonah Gabry (licensed under BSD-3).
+* Text &copy; 2018, Paul Buerkner, Aki Vehtari, Jonah Gabry (licensed under CC-BY-NC 4.0).
