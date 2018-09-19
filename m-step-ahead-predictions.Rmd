@@ -4,8 +4,6 @@ author: Paul Buerkner, Aki Vehtari, Jonah Gabry
 output:
   html_document: default
   pdf_document: default
-header-includes: 
-  - \newcommand{\yy}[1]{\ensuremath{\mathbf{y}_{#1}}}
 editor_options: 
   chunk_output_type: console
 ---
@@ -31,6 +29,9 @@ SEED <- 1234
 set.seed(SEED)
 ```
 
+
+\newcommand{\yy}[1]{\mathbf{y}_{{#1}}}
+
 ## Introduction
 
 One of the most common goals of a time series analysis is to use the observed
@@ -55,10 +56,10 @@ leave-one-out cross-validation (LOO-CV). For a data set with $N$ observations,
 we refit the model $N$ times, each time leaving out one of the $N$ observations
 and assessing how well the model predicts the left-out observation. LOO-CV is
 very expensive computationally in most realistic settings, but the Pareto
-smoothed importance sampling (PSIS) algorithm provided by the *loo* package
-allows for approximating exact LOO-CV with PSIS-LOO-CV. PSIS-LOO-CV requires
-only a single fit of the full model and comes with diagnostics for assessing the
-validity of the approximation.
+smoothed importance sampling (PSIS, Vehtari et al, 2017ab) algorithm provided by
+the *loo* package allows for approximating exact LOO-CV with PSIS-LOO-CV.
+PSIS-LOO-CV requires only a single fit of the full model and comes with
+diagnostics for assessing the validity of the approximation.
 
 With a time series we can do something similar to LOO-CV but, except in a few
 cases, it does not make sense to leave out observations one at a time because
@@ -87,15 +88,16 @@ more realistic applications than previously possible.
 
 ## M-step-ahead predictions
 
-Assume we have a time series of observations $(y_1, y_2, \ldots , y_N)$ and let
-$L$ be the _minimum_ number of observations from the series that we will require
-before making predictions for future data. Depending on the application and how
-informative the data is, it may not be possible to make reasonable predictions
-for $y_{i}$ based on $(y_1, \dots, y_{i-1})$ until $i$ is large enough so that
-we can learn enough about the time series to predict future observations.
-Setting $L=10$, for example, means that we will only assess predictive
-performance starting with the $y_{11}$th observation so that we always have at
-least 10 previous observations to condition on.
+Assume we have a time series of observations 
+$\mathbf{y} = (y_1, y_2, \ldots, y_N)$ 
+and let $L$ be the _minimum_ number of observations from the series that
+we will require before making predictions for future data. Depending on the
+application and how informative the data is, it may not be possible to make
+reasonable predictions for $y_{i}$ based on $(y_1, \dots, y_{i-1})$ until $i$ is
+large enough so that we can learn enough about the time series to predict future
+observations. Setting $L=10$, for example, means that we will only assess
+predictive performance starting with the $y_{11}$th observation so that we
+always have at least 10 previous observations to condition on.
 
 In order to assess $M$-SAP performance we would like to compute the 
 predictive densities
@@ -104,43 +106,77 @@ p(\yy{i<M} \,|\, \yy{<i}) = p(y_i, \ldots, y_{i + M - 1} \,|\, y_{1},...,y_{i-1}
 $$ 
 
 for each $i \in \{L + 1, \ldots, N - M + 1\}$. The quantities 
-$p(\mathbf{y}_{i<M} \,|\, \mathbf{y}_{<i})$ can be computed with the help of the 
-posterior distribution $p(\theta | \mathbf{y}_{<i})$ of the parameters $\theta$ based 
-on the $i-1$ earliest observations of the time-series:
+$p(\yy{i<M} \,|\, \yy{<i})$ can be computed with the help of the posterior
+distribution $p(\theta \,|\, \yy{<i})$ of the parameters $\theta$ conditional on
+only the first $i-1$ observations of the time-series:
 
 $$
-p(y_{i<m} \,| \, y_{<i}) = \int p(y_{i<m} \,| \, y_{<i}, \theta) \, p(\theta\,|\,y_{<i}) \,d\theta.
+p(\yy{i<M} \,| \, \yy{<i}) = 
+  \int p(\yy{i<M} \,| \, \yy{<i}, \theta) \, p(\theta\,|\,\yy{<i}) \,d\theta.
 $$
-Having obtained $S$ random draws $\theta_{<i}^{(s)}$ ($s = 1,...,S$) of the posterior distribution $p(\theta\,|\,y_{<i})$, we can estimate $p(y_i | y_{<i})$ by means of
+Having obtained $S$ draws $(\theta_{<i}^{(1)}, \ldots, \theta_{<i}^{(S)})$ from the posterior distribution $p(\theta\,|\,\yy{<i})$, we can estimate $p(\yy{i<M} | \yy{<i})$ by means of
 
 $$
-p(y_{i<m} \,|\, y_{<i}) \approx \sum_{s=1}^S p(y_{i<m} \,|\, y_{<i}, \theta_{<i}^{(s)}).
+p(\yy{i<M} \,|\, \yy{<i}) \approx \sum_{s=1}^S p(\yy{i<M} \,|\, \yy{<i}, \theta_{<i}^{(s)}).
 $$
 
-In the following, we consider factorized models in which the response values are conditionally independent given the parameters and the likelihood
-can be written in the familiar form
+In the following, we consider factorizable models in which the response values
+are conditionally independent given the parameters and the likelihood can be
+written in the familiar form
 
 $$
-p(y \,|\, \theta) = \prod_{i=1}^N p(y_i \,|\, \theta).
+p(\mathbf{y} \,|\, \theta) = \prod_{i=1}^N p(y_i \,|\, \theta).
 $$
-In this case, $p(y_{i<m} \,|\, y_{<i}, \theta_{<i})$ reduces to $\prod_{j = i}^{i + m -1} p(y_j \,|\, \theta_{<i})$.
+In this case, $p(\yy{i<M} \,|\, \yy{<i}, \theta_{<i})$ reduces to 
+$\prod_{j = i}^{i + M -1} p(y_j \,|\, \theta_{<i})$. Non-factorizable models
+are discussed in a separate vignette [_Leave-one-out cross-validation for non-factorizable models_](http://mc-stan.org/loo/articles/loo2-non-factorizable.html).
 
 ## Approximate $M$-SAP using importance-sampling
 
-To reduce the number of models that need to be fitted for the purpose of obtaining $p(y_{i<m} \,|\, y_{<i})$, we propose the following algorithm. Starting at the end of the time-series (i.e. $i = N - m + 1$), we compute $p(y_{i<m} \,|\, y_{<i})$ with approximate leave-m-out cross-validation using importance sampling:
+Unfortunately, the math above makes use of the posterior distributions from many
+different fits of the model to different subsets of the data. That is, to obtain
+the predictive density $p(\yy{i<M} \,|\, \yy{<i})$ requires fitting a model to
+only the first $i-1$ data points, and we will need to do this for every value of
+$i$ under consideration (all $i \in {L + 1, \ldots, N - M + 1}})$.
+
+To reduce the number of models that need to be fit for the purpose of obtaining
+each of the densities $p(\yy{i<M} \,|\, \yy{<i})$, we propose the following
+algorithm. Starting at the end of the time-series (i.e. $i = N - M + 1$), we
+approximate each $p(\yy{i<M} \,|\, \yy{<i})$ using Pareto smoothed importance
+sampling:
 
 $$
- p(y_{i<m} \,|\, y_{<i}) \approx
-   \frac{ \sum_{s=1}^S p(y_{i<m} \,|\, \theta^{(s)}) \, w_i^{(s)}}{ \sum_{s=1}^S w_i^{(s)}},
+ p(\yy{i<M} \,|\, \yy{<i}) \approx
+   \frac{ \sum_{s=1}^S w_i^{(s)}\, p(\yy{i<M} \,|\, \theta^{(s)})}{ \sum_{s=1}^S w_i^{(s)}},
 $$
 
-where $w_i^{(s)}$ are importance weights and $\theta^{(s)}$ are draws from the posterior distribution based on all observations. To obtain $w_i^{(s)}$, we first compute the raw importance ratios
+where $w_i^{(s)}$ are importance weights and $\theta^{(s)}$ are draws from the
+posterior distribution based on _all_ observations. To obtain $w_i^{(s)}$, we
+first compute the raw importance ratios
 
 $$
 r_i^{(s)} \propto \frac{1}{\prod_{j = i}^N p(y_j \,|\, \,\theta^{(s)})}
 $$
 
-and then stabilize them using Pareto smoothed importance sampling (PSIS, Vehtari et al, 2017ab). We then decrease $i$ by $1$ and repeat the process. At some observation $i$, the variability of importance ratios $r_i^{(s)}$ will become too large and importance sampling fails (diagnosed by Pareto-$k$-estimates greater than $0.7$). Then we refit the model using only observations up to the $i$th one and restart the process until we arrived at the $L+1$th observation, where $L$ is the minimum sample size required to make predictions ($L=0$ if predictions of all observations should be computed).
+and then stabilize them using Pareto smoothed importance sampling 
+(Vehtari et al, 2017ab).
+
+We then decrease $i$ by $1$ and repeat the process. At some observation $i$, the
+variability of importance ratios $r_i^{(s)}$ will become too large and
+importance sampling fails. We will refer to this particular value of $i$ as
+$i^\star_1$. To identify the value of $i^\star_1$ we check for which value of
+$i$ does the estimated shape parameter $k$ of the generalized Pareto
+distribution first cross $0.7$ (Vehtari et al, 2017ab). Only then do we refit
+the model using only observations up to $i^\star_1$ and then restart the
+process, repeating the refitting as few times as is required (only if $k > 0.7$)
+to arrive at $i = L+1$.  Recall that $L$ is the minimum number of observations
+we have deemed acceptable for making predictions (setting $L=0$ means
+predictions of all observations should be computed). In some cases we may only
+need to refit once and in other cases we will find a value $i^\star_2$ that
+requires a second refitting, maybe an $i^\star_3$ that requires a third
+refitting, and so on.
+
+
 
 ## Autoregressive models
 
@@ -204,7 +240,7 @@ loo(log_lik(fit)[, (L+1):N])
 
 ## 1-step-ahead predictions leaving out all future values
 
-The most basic version of $M$-SAP is 1-SAP in which we predict only one step ahead. In this case, $y_{i<m}$ simplifies to $y_{i}$ and the above described algorithm becomes considerably simpler.
+The most basic version of $M$-SAP is 1-SAP in which we predict only one step ahead. In this case, $\yy{i<M}$ simplifies to $y_{i}$ and the above described algorithm becomes considerably simpler.
 
 ### Exact 1-step-ahead predictions
 
