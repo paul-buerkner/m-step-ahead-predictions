@@ -4,6 +4,8 @@ author: Paul Buerkner, Aki Vehtari, Jonah Gabry
 output:
   html_document: default
   pdf_document: default
+header-includes: 
+  - \newcommand{\yy}[1]{\ensuremath{\mathbf{y}_{#1}}}
 editor_options: 
   chunk_output_type: console
 ---
@@ -31,15 +33,81 @@ set.seed(SEED)
 
 ## Introduction
 
-The idea of m-step-ahead predictions (m-SAP) for time-series models is to predict $m$ observations ahead using only past observations of the time-series and no future observations. Doing exact m-SAP requires repeatedly fitting the model for each set of $m$ observations to be predicted. This is usually very time-intensive in particular for Bayesian models and so we seek to approximate m-SAP using as few refits of the model as possible.
+One of the most common goals of a time series analysis is to use the observed
+series to inform predictions for future observations. We will refer to this task
+of predicting a sequence of $M$ future observations as $M$-step-ahead prediction
+($M$-SAP). Fortunately, once we have fit a model and can sample from the
+posterior predictive distribution, it is straightforward to generate predictions
+as far into the future as we want. It is also straightforward to evaluate the
+$M$-SAP performance of a time series model by comparing the predictions to the
+observed sequence of $M$ future data points once they become available.
 
-## m-step-ahead predictions
+Unfortunately, we are often in the position of having to use a model to inform
+decisions _before_ we can collect the future observations required for assessing
+the predictive performance. If we have many competing models we may also need to
+first decide which of the models (or which combination of the models) we should
+rely on for predictions. In these situations the best we can do is to use
+methods for approximating the expected predictive performance of our models
+using only the observations of the time series we already have.
 
-Assume we have a time-series of observations $(y_1, y_2, ..., y_N)$, then the goal of m-SAP is to compute the predictive density
+If there were no time dependence in the data we could use methods like
+leave-one-out cross-validation (LOO-CV). For a data set with $N$ observations,
+we refit the model $N$ times, each time leaving out one of the $N$ observations
+and assessing how well the model predicts the left-out observation. LOO-CV is
+very expensive computationally in most realistic settings, but the Pareto
+smoothed importance sampling (PSIS) algorithm provided by the *loo* package
+allows for approximating exact LOO-CV with PSIS-LOO-CV. PSIS-LOO-CV requires
+only a single fit of the full model and comes with diagnostics for assessing the
+validity of the approximation.
+
+With a time series we can do something similar to LOO-CV but, except in a few
+cases, it does not make sense to leave out observations one at a time because
+then we are allowing information from the future to influence predictions of the
+past (i.e., times $t + 1, t+2, \ldots$ should not be used to predict for time
+$t$). To apply the idea of cross-validation to the $M$-SAP case, instead of
+leave-*one*-out cross-validation we need some form of leave-*future*-out
+cross-validation (LFO-CV). As we will demonstrate in this case study, LFO-CV
+does not refer to one particular prediction task but rather to various possible
+cross-validation approaches that all involve some form of prediction for new
+time series data. Like exact LOO-CV, exact LFO-CV requires refitting the model
+many times to different subsets of the data, which is infeasible for most
+nontrivial examples, in particular for Bayesian analyses where refitting the
+model means estimating a new posterior distribution rather than a point
+estimate.
+
+Although PSIS-LOO-CV provides an efficient approximation to exact LOO-CV, until
+now there has not been an analogous approximation to exact LFO-CV that
+drastically reduces the computational burden while also providing informative
+diagnostics about the quality of the approximation. In this case study we
+present PSIS-LFO-CV, an algorithm that typically only requires refitting the
+time-series model a small number times and will make LFO-CV tractable for many
+more realistic applications than previously possible.
+
+
+
+## M-step-ahead predictions
+
+Assume we have a time series of observations $(y_1, y_2, \ldots , y_N)$ and let
+$L$ be the _minimum_ number of observations from the series that we will require
+before making predictions for future data. Depending on the application and how
+informative the data is, it may not be possible to make reasonable predictions
+for $y_{i}$ based on $(y_1, \dots, y_{i-1})$ until $i$ is large enough so that
+we can learn enough about the time series to predict future observations.
+Setting $L=10$, for example, means that we will only assess predictive
+performance starting with the $y_{11}$th observation so that we always have at
+least 10 previous observations to condition on.
+
+In order to assess $M$-SAP performance we would like to compute the 
+predictive densities
 $$
-p(y_{i<m} | y_{<i}) = p(y_i, ..., y_{i + m - 1} | y_{1},...,y_{i-1})
+p(\yy{i<M} \,|\, \yy{<i}) = p(y_i, \ldots, y_{i + M - 1} \,|\, y_{1},...,y_{i-1})
 $$ 
-for all $i$ between $L + 1$ and $N - m + 1$, where $L$ is the minimum number of values required to make predictions (e.g., $L = 10$ if we want to start with predicting the $11$th observation). The quantities $p(y_{i<m} | y_{<i})$ can be computed as follows with the help of the posterior distribution $p(\theta | y_{<i})$ of the parameters $\theta$ based on the $i-1$ earliest observations of the time-series:
+
+for each $i \in \{L + 1, \ldots, N - M + 1\}$. The quantities 
+$p(\mathbf{y}_{i<M} \,|\, \mathbf{y}_{<i})$ can be computed with the help of the 
+posterior distribution $p(\theta | \mathbf{y}_{<i})$ of the parameters $\theta$ based 
+on the $i-1$ earliest observations of the time-series:
+
 $$
 p(y_{i<m} \,| \, y_{<i}) = \int p(y_{i<m} \,| \, y_{<i}, \theta) \, p(\theta\,|\,y_{<i}) \,d\theta.
 $$
@@ -57,7 +125,7 @@ p(y \,|\, \theta) = \prod_{i=1}^N p(y_i \,|\, \theta).
 $$
 In this case, $p(y_{i<m} \,|\, y_{<i}, \theta_{<i})$ reduces to $\prod_{j = i}^{i + m -1} p(y_j \,|\, \theta_{<i})$.
 
-## Approximate m-SAP using importance-sampling
+## Approximate $M$-SAP using importance-sampling
 
 To reduce the number of models that need to be fitted for the purpose of obtaining $p(y_{i<m} \,|\, y_{<i})$, we propose the following algorithm. Starting at the end of the time-series (i.e. $i = N - m + 1$), we compute $p(y_{i<m} \,|\, y_{<i})$ with approximate leave-m-out cross-validation using importance sampling:
 
@@ -85,7 +153,7 @@ where $\eta_i$ is the linear predictor of observation $i$, $\phi_k$ are the auto
 
 ## Case Study: Annual measurements of the level of Lake Huron
 
-To illustrate the application of m-SAP, we will use the annual measurements of the level (in feet) of Lake Huron 1875–1972 as a case study, which is shipped natively with **R**.
+To illustrate the application of $M$-SAP, we will use the annual measurements of the level (in feet) of Lake Huron 1875–1972 as a case study, which is shipped natively with **R**.
 
 ```{r}
 plot(LakeHuron)
@@ -136,7 +204,7 @@ loo(log_lik(fit)[, (L+1):N])
 
 ## 1-step-ahead predictions leaving out all future values
 
-The most basic version of m-SAP is 1-SAP in which we predict only one step ahead. In this case, $y_{i<m}$ simplifies to $y_{i}$ and the above described algorithm becomes considerably simpler.
+The most basic version of $M$-SAP is 1-SAP in which we predict only one step ahead. In this case, $y_{i<m}$ simplifies to $y_{i}$ and the above described algorithm becomes considerably simpler.
 
 ### Exact 1-step-ahead predictions
 
@@ -266,7 +334,7 @@ No observation shows a distance between exact and approximate elpd of more than 
 
 ## m-step-ahead predictions leaving out all future values
 
-To illustrate the application of m-SAP if $m > 1$, we compute exact and approximate 4-SAP and on the AR(2) model fitted to the Lake Huron data.
+To illustrate the application of $M$-SAP if $m > 1$, we compute exact and approximate 4-SAP and on the AR(2) model fitted to the Lake Huron data.
 
 ### Exact m-step-ahead predictions
 
@@ -358,7 +426,7 @@ ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
 
 ## 1-step-ahead predictions leaving out blocks of future values
 
-Depending on the particular time-series model and data, the Pareto-$k$-estimates will exceed $0.7$ rather quickly (i.e. after only few observations) and thus many refits may be required even if applying the above described algorithm. In this case, an option is to exclude only a number of $B$ future values which directly follow the observations to be predicted while keeping all more distant future values $B+1$ to $N$. This will usually result in lower Pareto-$k$-estimates and thus less refitting. The block-m-SAP resembles the basic m-SAP closely only if values in the distant future (that is further away than $B$ steps) contain little information about the current observations being predicted. Whether this assumption is justified depends on the data and applied time-series model. We are going to illustrate this approach using block-1-SAP.
+Depending on the particular time-series model and data, the Pareto-$k$-estimates will exceed $0.7$ rather quickly (i.e. after only few observations) and thus many refits may be required even if applying the above described algorithm. In this case, an option is to exclude only a number of $B$ future values which directly follow the observations to be predicted while keeping all more distant future values $B+1$ to $N$. This will usually result in lower Pareto-$k$-estimates and thus less refitting. The block-$M$-SAP resembles the basic $M$-SAP closely only if values in the distant future (that is further away than $B$ steps) contain little information about the current observations being predicted. Whether this assumption is justified depends on the data and applied time-series model. We are going to illustrate this approach using block-1-SAP.
 
 ### Exact 1-step-ahead predictions
 
