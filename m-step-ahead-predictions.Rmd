@@ -595,5 +595,5 @@ sessionInfo()
 
 ### Appendix: Licenses
 
-* Code &copy; 2018, Paul Buerkner, Aki Vehtari, licensed under BSD-3.
-* Text &copy; 2018, Paul Buerkner, Aki Vehtari, licensed under CC-BY-NC 4.0.
+* Code &copy; 2018, Paul Buerkner, Aki Vehtari, Jonah Gabry licensed under BSD-3.
+* Text &copy; 2018, Paul Buerkner, Aki Vehtari, Jonah Gabry licensed under CC-BY-NC 4.0.
