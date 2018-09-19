@@ -1,5 +1,6 @@
 ---
-title: "PSIS assisted m-step-ahead predictions for time-series models"
+title: "Introducing PSIS-LFO-CV"
+subtitle: "Approximate leave-future-out cross-validation for time series models"
 author: Paul Buerkner, Aki Vehtari, Jonah Gabry
 output:
   html_document: default
@@ -137,7 +138,7 @@ Unfortunately, the math above makes use of the posterior distributions from many
 different fits of the model to different subsets of the data. That is, to obtain
 the predictive density $p(\yy{i<M} \,|\, \yy{<i})$ requires fitting a model to
 only the first $i-1$ data points, and we will need to do this for every value of
-$i$ under consideration (all $i \in {L + 1, \ldots, N - M + 1}})$.
+$i$ under consideration (all $i \in \{L + 1, \ldots, N - M + 1\}$).
 
 To reduce the number of models that need to be fit for the purpose of obtaining
 each of the densities $p(\yy{i<M} \,|\, \yy{<i})$, we propose the following
@@ -167,15 +168,14 @@ importance sampling fails. We will refer to this particular value of $i$ as
 $i^\star_1$. To identify the value of $i^\star_1$ we check for which value of
 $i$ does the estimated shape parameter $k$ of the generalized Pareto
 distribution first cross $0.7$ (Vehtari et al, 2017ab). Only then do we refit
-the model using only observations up to $i^\star_1$ and then restart the
-process, repeating the refitting as few times as is required (only if $k > 0.7$)
-to arrive at $i = L+1$.  Recall that $L$ is the minimum number of observations
-we have deemed acceptable for making predictions (setting $L=0$ means
-predictions of all observations should be computed). In some cases we may only
-need to refit once and in other cases we will find a value $i^\star_2$ that
-requires a second refitting, maybe an $i^\star_3$ that requires a third
-refitting, and so on.
-
+the model using only observations before $i^\star_1$ and then restart the
+process. In some cases we may only need to refit once and in other cases we will
+find a value $i^\star_2$ that requires a second refitting, maybe an $i^\star_3$
+that requires a third refitting, and so on. We repeat the refitting as few times
+as is required (only if $k > 0.7$) until we arrive at $i = L+1$.  Recall that
+$L$ is the minimum number of observations we have deemed acceptable for making
+predictions (setting $L=0$ means predictions of all observations should be
+computed).
 
 
 ## Autoregressive models
