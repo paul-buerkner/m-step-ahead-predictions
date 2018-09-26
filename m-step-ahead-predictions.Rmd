@@ -373,10 +373,13 @@ produce stable results ($k < 0.7$).
 ```{r loglik}
 approx_elpds_1sap_no_refit <- rep(NA, N)
 loglik <- log_lik(fit)
-logratio <- matrix(nrow = nsamples(fit), ncol = N)
-for (i in N:(L + 1)) {
-  logratio[, i] <- log_ratios(loglik, i:N)
-  psis_part <- psis(logratio[, i:N], r_eff = NA)
+ids <- N:(L + 1)
+ks <- NULL
+
+for (i in ids) {
+  logratio <- log_ratios(loglik, i:N)
+  psis_part <- suppressWarnings(psis(logratio))
+  ks <- c(ks, pareto_k_values(psis_part))
   lw_i <- weights(psis_part, normalize = TRUE)[, 1]
   approx_elpds_1sap_no_refit[i] <- log_sum_exp(lw_i + loglik[, i])
 }
@@ -388,10 +391,20 @@ we get $k > 0.7$. This is indicated by the vertical line in the plot below, whic
 corresponds to the point $i^\star_1$ discussed in the section
 [Approximate $M$-SAP using importance-sampling](#approximate_MSAP) above.
 
+```{r plot_ks}
+plot_ks <- function(ks, ids, thres = 0.7) {
+  dat_ks <- data.frame(ks = ks, ids = ids)
+  ggplot(dat_ks, aes(x = ids, y = ks)) + 
+    geom_point(aes(color = ks > thres), shape = 3, show.legend = FALSE) + 
+    geom_hline(yintercept = thres, linetype = 2, color = "red2") + 
+    scale_color_manual(values = c("cornflowerblue", "darkblue")) + 
+    labs(x = "Data point", y = "Pareto k") + 
+    ylim(-0.5, 1.5)
+}
+```
+
 ```{r, cache = FALSE}
-psis_full <- psis(logratio[, (L + 1):N], r_eff = NULL)
-plot(psis_full)
-abline(v = which.max(pareto_k_ids(psis_full, threshold = 0.7)))
+plot_ks(ks, ids)
 ```
 
 Consequently, it is not surprising that the resulting approximate ELPD for 1-SAP 
@@ -422,11 +435,12 @@ loglik <- matrix(nrow = nsamples(fit), ncol = N)
 approx_elpds_1sap <- rep(NA, N)
 
 fit_part <- fit
+ids <- N:(L + 1)
 i_refit <- N
 refits <- NULL
 ks <- NULL
 
-for (i in N:(L + 1)) {
+for (i in ids) {
   loglik[, i] <- log_lik(fit_part)[, i]
   logratio <- log_ratios(loglik, i:i_refit)
   psis_part <- suppressWarnings(psis(logratio))
@@ -451,17 +465,7 @@ of 0.7 and that we only needed to refit the model `r length(refits)` times at
 observations `r refits`.
 
 ```{r, cache=FALSE}
-plot_ks <- function(ks, ids) {
-  dat_ks <- data.frame(ks = rev(ks), ids = ids)
-  ggplot(dat_ks, aes(x = ids, y = ks)) + 
-    geom_point(aes(color = ks > 0.7, shape = ks > 0.7), show.legend = FALSE) + 
-    geom_hline(yintercept = 0.7, linetype = 2, color = "red2") + 
-    scale_color_manual(values = c("black", "red3")) + 
-    scale_shape_manual(values = c(19, 8)) +
-    labs(x = "Data point", y = "Pareto k") + 
-    ylim(-0.5, 1.5)
-}
-plot_ks(ks, ids = (L + 1):N)
+plot_ks(ks, ids)
 ```
 
 The approximate 1-SAP ELPD is remarkably similar to the exact 1-SAP ELPD
@@ -494,8 +498,8 @@ ggplot(dat_elpd, aes(x = approx_elpd, y = exact_elpd)) +
 ```
 
 ```{r, echo=FALSE}
-max_diff <- with(dat_elpd, max(abs(approx_elpd - exact_elpd)))
-mean_diff <- with(dat_elpd, mean(abs(approx_elpd - exact_elpd)))
+max_diff <- with(dat_elpd, max(abs(approx_elpd - exact_elpd), na.rm = TRUE))
+mean_diff <- with(dat_elpd, mean(abs(approx_elpd - exact_elpd), na.rm = TRUE))
 ```
 
 No observation shows a difference between the exact and approximate ELPD
@@ -538,13 +542,14 @@ underlying principles remain the same.
 loglikm <- loglik <- matrix(nrow = nsamples(fit), ncol = N)
 approx_elpds_4sap <- rep(NA, N)
 fit_part <- fit
+ids <- (N - M + 1):(L + 1)
 i_refit <- N - M + 1
 refits <- NULL
 ks <- NULL
 
 loglik[, (N - M + 2):N] <- log_lik(fit_part)[, (N - M + 2):N]
 
-for (i in (N - M + 1):(L + 1)) {
+for (i in ids) {
   ll <- log_lik(fit_part, newdata = df[1:(i + M - 1), ])
   loglikm[, i] <- rowSums(ll[, i:(i + M - 1)])
   loglik[, i] <- ll[, i]
@@ -576,11 +581,11 @@ threshold and that we only needed to refit the model `r length(refits)` times at
 observations `r refits`.
 
 ```{r, cache = FALSE}
-plot_ks(ks, ids = (L + 1):(N - M + 1))
+plot_ks(ks, ids)
 ```
 
 Similar to the 1-SAP case, the approximate ELPD computed for the 4-SAP case 
-is very close to its exact counterpart.
+is close to its exact counterpart.
 
 ```{r, cache = FALSE}
 approx_elpd_4sap <- sum(approx_elpds_4sap, na.rm = TRUE)
@@ -678,11 +683,12 @@ We compute approximate PSIS-LFO-CV for block-1-SAP as follows.
 loglik <- matrix(nrow = nsamples(fit), ncol = N)
 approx_elpds_1sap_block <- rep(NA, N)
 fit_part <- fit
+ids <- N:(L + 1)
 i_refit <- N
 refits <- NULL
 ks <- NULL
 
-for (i in N:(L + 1)) {
+for (i in ids) {
   loglik[, i] <- log_lik(fit_part)[, i]
   to <- min(i + B - 1, i_refit)
   logratio <- log_ratios(loglik, i:to)
@@ -708,7 +714,7 @@ have a time-series of 98 observations and are predicting for
 $98-L = $ `r 98 - L` of them.
 
 ```{r, cache = FALSE}
-plot_ks(ks, ids = (L + 1):N)
+plot_ks(ks, ids)
 ```
 
 Consequently, it is not surprising that PSIS-LFO-CV for block-1-SAP matches the
