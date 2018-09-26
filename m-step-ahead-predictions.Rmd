@@ -58,7 +58,8 @@ rely on for predictions. In these situations the best we can do is to use
 methods for approximating the expected predictive performance of our models
 using only the observations of the time series we already have.
 
-If there were no time dependence in the data we could use methods like
+If there were no time dependence in the data or if the focus is to assess
+the non-time-dependent part of the model, we could use methods like
 leave-one-out cross-validation (LOO-CV). For a data set with $N$ observations,
 we refit the model $N$ times, each time leaving out one of the $N$ observations
 and assessing how well the model predicts the left-out observation. LOO-CV is
@@ -78,7 +79,8 @@ cross-validation (LFO-CV). As we will demonstrate in this case study, LFO-CV
 does not refer to one particular prediction task but rather to various possible
 cross-validation approaches that all involve some form of prediction for new
 time series data. Like exact LOO-CV, exact LFO-CV requires refitting the model
-many times to different subsets of the data, which is infeasible for most
+many times to different subsets of the data, which is computationally very
+costly for most
 nontrivial examples, in particular for Bayesian analyses where refitting the
 model means estimating a new posterior distribution rather than a point
 estimate.
@@ -149,7 +151,7 @@ $\yy{<i}$ given $\theta_{<i}$.
 Non-factorizable models, which do not make this assumption, are discussed in a
 separate vignette [_Leave-one-out cross-validation for non-factorizable models_](http://mc-stan.org/loo/articles/loo2-non-factorizable.html).
 
-## Approximate $M$-SAP using importance-sampling
+## [Approximate $M$-SAP using importance-sampling](#approximate_MSAP)
 
 Unfortunately, the math above makes use of the posterior distributions from many
 different fits of the model to different subsets of the data. That is, to obtain
@@ -237,7 +239,6 @@ plot_labs <- labs(
 )
 
 ggplot(df, aes(x = year, y = y)) + 
-  geom_line() + 
   geom_point(size = 1) +
   plot_labs
 ```
@@ -279,7 +280,7 @@ ggplot(cbind(df, preds), aes(x = year, y = Estimate)) +
 ```
 
 To allow for reasonable predictions of future values, we will require at least
-$L = 15$ observations to make predictions.
+$L = 15$ historical observations (15 years) to make predictions.
 
 ```{r}
 L <- 15
@@ -385,7 +386,7 @@ If we plot the Pareto $k$ estimates we can see that they do start to increase
 quickly and that once we work backwards to about halfway through the data points 
 we get $k > 0.7$. This is indicated by the vertical line in the plot below, which 
 corresponds to the point $i^\star_1$ discussed in the section
-**Approximate $M$-SAP using importance-sampling** above.
+[Approximate $M$-SAP using importance-sampling](#approximate_MSAP) above.
 
 ```{r, cache = FALSE}
 psis_full <- psis(logratio[, (L + 1):N], r_eff = NA)
