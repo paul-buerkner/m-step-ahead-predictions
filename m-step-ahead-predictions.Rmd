@@ -11,11 +11,11 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  cache=TRUE, 
-  message=FALSE, 
-  error=FALSE,
-  warning=FALSE, 
-  comment=NA, 
+  cache = TRUE, 
+  message = FALSE, 
+  error = FALSE,
+  warning = FALSE, 
+  comment = NA, 
   dev = "png",
   dpi = 150,
   fig.asp = 0.618,
@@ -26,7 +26,7 @@ knitr::opts_chunk$set(
 ```
 
 
-```{r pkgs}
+```{r pkgs, cache=FALSE}
 library(brms)
 library(loo)
 theme_set(theme_default())
@@ -236,7 +236,7 @@ plot_labs <- labs(
   y = "Water Level (ft)", 
   x = "Year",
   title = "Water Level in Lake Huron (1875-1972)"
-)
+) 
 
 ggplot(df, aes(x = year, y = y)) + 
   geom_point(size = 1) +
@@ -291,7 +291,7 @@ purpose of later comparison with exact and approximate LFO-CV for the 1-SAP
 case.
 
 ```{r, cache = FALSE}
-loo_cv <- loo(log_lik(fit)[, (L+1):N])
+loo_cv <- loo(log_lik(fit)[, (L + 1):N])
 print(loo_cv)
 ```
 
@@ -334,8 +334,8 @@ log_mean_exp <- function(x) {
 
 # compute log of raw importance ratios
 log_ratios <- function(ll, ids = NULL) {
-  if (!is.null(ids)) ll <- ll[, ids, drop=FALSE]
-  -rowSums(ll)
+  if (!is.null(ids)) ll <- ll[, ids, drop = FALSE]
+  - rowSums(ll)
 }
 
 # for printing comparisons later
@@ -389,7 +389,7 @@ corresponds to the point $i^\star_1$ discussed in the section
 [Approximate $M$-SAP using importance-sampling](#approximate_MSAP) above.
 
 ```{r, cache = FALSE}
-psis_full <- psis(logratio[, (L + 1):N], r_eff = NA)
+psis_full <- psis(logratio[, (L + 1):N], r_eff = NULL)
 plot(psis_full)
 abline(v = which.max(pareto_k_ids(psis_full, threshold = 0.7)))
 ```
@@ -398,7 +398,8 @@ Consequently, it is not surprising that the resulting approximate ELPD for 1-SAP
 is far away from the exact ELPD we computed above:
 
 ```{r, cache = FALSE}
-approx_elpd_1sap_no_refit <- c(ELPD = sum(approx_elpds_1sap_no_refit, na.rm = TRUE))
+approx_elpd_1sap_no_refit <- 
+  c(ELPD = sum(approx_elpds_1sap_no_refit, na.rm = TRUE))
 rbind_print(
   "approx LFO (no refit)" = approx_elpd_1sap_no_refit,
   "exact LFO" = exact_elpd_1sap
@@ -413,32 +414,30 @@ k_thres <- 0.7
 ```
 
 The code becomes a little bit more involved to handle the refitting procedure.
-Note that we can compute exact 1-SAP at the refitting points, which comes with no
-additional computational costs since we had to refit the model anyway.
+Note that we can compute exact 1-SAP at the refitting points, which comes with
+no additional computational costs since we had to refit the model anyway.
 
 ```{r refit_loglik, results="hide"}
 loglik <- matrix(nrow = nsamples(fit), ncol = N)
-logratio <- matrix(nrow = nsamples(fit), ncol = N)
 approx_elpds_1sap <- rep(NA, N)
 
 fit_part <- fit
 i_refit <- N
 refits <- NULL
-max_k <- NULL
+ks <- NULL
 
 for (i in N:(L + 1)) {
   loglik[, i] <- log_lik(fit_part)[, i]
-  logratio[, i] <- log_ratios(loglik, i:i_refit)
-  psis_part <- psis(logratio[, i:i_refit], r_eff = NA)
-  ks <- pareto_k_values(psis_part)
-  max_k <- c(max_k, max(ks))
-  if (any(ks > k_thres)) {
+  logratio <- log_ratios(loglik, i:i_refit)
+  psis_part <- suppressWarnings(psis(logratio))
+  k <- pareto_k_values(psis_part)
+  ks <- c(ks, k)
+  if (k > k_thres) {
     # refit the model based on the first i-1 observations
     i_refit <- i
     refits <- c(refits, i)
-    fit_part <- update(fit_part, newdata = df[1:(i-1), ], recompile = FALSE)
+    fit_part <- update(fit_part, newdata = df[1:(i - 1), ], recompile = FALSE)
     loglik[, i] <- log_lik(fit_part, newdata = df[1:i, ])[, i]
-    logratio[, i] <- log_ratios(loglik, i:i_refit)
     approx_elpds_1sap[i] <- log_mean_exp(loglik[, i])
   } else {
     lw_i <- weights(psis_part, normalize = TRUE)[, 1]
@@ -452,17 +451,17 @@ of 0.7 and that we only needed to refit the model `r length(refits)` times at
 observations `r refits`.
 
 ```{r, cache=FALSE}
-plot_max_k <- function(max_k, ids) {
-  dat_max_k <- data.frame(max_k = rev(max_k), ids = ids)
-  ggplot(dat_max_k, aes(x = ids, y = max_k)) + 
-    geom_point(aes(color = max_k > 0.7, shape = max_k > 0.7), show.legend = FALSE) + 
+plot_ks <- function(ks, ids) {
+  dat_ks <- data.frame(ks = rev(ks), ids = ids)
+  ggplot(dat_ks, aes(x = ids, y = ks)) + 
+    geom_point(aes(color = ks > 0.7, shape = ks > 0.7), show.legend = FALSE) + 
     geom_hline(yintercept = 0.7, linetype = 2, color = "red2") + 
     scale_color_manual(values = c("black", "red3")) + 
     scale_shape_manual(values = c(19, 8)) +
-    labs(x = "Data point", y = "max(Pareto k)") + 
+    labs(x = "Data point", y = "Pareto k") + 
     ylim(-0.5, 1.5)
 }
-plot_max_k(max_k, ids = (L+1):N)
+plot_ks(ks, ids = (L + 1):N)
 ```
 
 The approximate 1-SAP ELPD is remarkably similar to the exact 1-SAP ELPD
@@ -536,12 +535,12 @@ involved than the approximate version for the 1-SAP case, although the
 underlying principles remain the same.
 
 ```{r refit_loglikm, results="hide"}
-loglikm <- loglik <- logratio <- matrix(nrow = nsamples(fit), ncol = N)
+loglikm <- loglik <- matrix(nrow = nsamples(fit), ncol = N)
 approx_elpds_4sap <- rep(NA, N)
 fit_part <- fit
 i_refit <- N - M + 1
 refits <- NULL
-max_k <- NULL
+ks <- NULL
 
 loglik[, (N - M + 2):N] <- log_lik(fit_part)[, (N - M + 2):N]
 
@@ -549,25 +548,24 @@ for (i in (N - M + 1):(L + 1)) {
   ll <- log_lik(fit_part, newdata = df[1:(i + M - 1), ])
   loglikm[, i] <- rowSums(ll[, i:(i + M - 1)])
   loglik[, i] <- ll[, i]
-  logratio[, i] <- log_ratios(loglik, i:i_refit)
-  psis_part <- psis(logratio[, i:i_refit], r_eff = NA)
-  ks <- pareto_k_values(psis_part)
-  max_k <- c(max_k, max(ks))
-  if (any(ks > k_thres)) {
+  logratio <- log_ratios(loglik, i:i_refit)
+  psis_part <- suppressWarnings(psis(logratio))
+  k <- pareto_k_values(psis_part)
+  ks <- c(ks, k)
+  if (k > k_thres) {
     # refit the model based on the first i-1 observations
     i_refit <- i
     refits <- c(refits, i)
     fit_part <- update(
-      fit_part, newdata = df[1:(i-1), ], 
+      fit_part, newdata = df[1:(i - 1), ], 
       recompile = FALSE
     )
     ll <- log_lik(fit_part, newdata = df[1:(i + M - 1), ])
     loglik[, i] <- ll[, i]
     loglikm[, i] <- rowSums(ll[, i:(i + M - 1)])
-    logratio[, i] <- log_ratios(loglik, i:i_refit)
     approx_elpds_4sap[i] <- log_mean_exp(loglikm[, i])
   } else {
-    lw_i <- weights(psis_part, normalize=TRUE)[, 1]
+    lw_i <- weights(psis_part, normalize = TRUE)[, 1]
     approx_elpds_4sap[i] <- log_sum_exp(lw_i + loglikm[, i])
   }
 }
@@ -578,7 +576,7 @@ threshold and that we only needed to refit the model `r length(refits)` times at
 observations `r refits`.
 
 ```{r, cache = FALSE}
-plot_max_k(max_k, ids = (L+1):(N - M + 1))
+plot_ks(ks, ids = (L + 1):(N - M + 1))
 ```
 
 Similar to the 1-SAP case, the approximate ELPD computed for the 4-SAP case 
@@ -605,7 +603,6 @@ ggplot(dat_elpd_4sap, aes(x = approx_elpd, y = exact_elpd)) +
   geom_point(size = 2) +
   labs(x = "Approximate ELPDs", y = "Exact ELPDs")
 ```
-
 
 ## 1-step-ahead predictions leaving out blocks of future values
 
@@ -667,7 +664,7 @@ dat_elpd_diff <- data.frame(
   i = seq_along(exact_elpds_1sap_block)
 )
 
-ggplot(dat_elpd_diff[(L+1):N, ], aes(x = i, y = elpd_diff)) +
+ggplot(dat_elpd_diff[(L + 1):N, ], aes(x = i, y = elpd_diff)) +
   geom_point(size = 2) +
   labs(x = "Data Point", y = "ELPD diff")
 ```
@@ -678,28 +675,26 @@ ggplot(dat_elpd_diff[(L+1):N, ], aes(x = i, y = elpd_diff)) +
 We compute approximate PSIS-LFO-CV for block-1-SAP as follows.
 
 ```{r refit_loglik_block, results="hide"}
-loglik <- logratio <- matrix(nrow = nsamples(fit), ncol = N)
+loglik <- matrix(nrow = nsamples(fit), ncol = N)
 approx_elpds_1sap_block <- rep(NA, N)
 fit_part <- fit
 i_refit <- N
 refits <- NULL
-max_k <- NULL
+ks <- NULL
 
 for (i in N:(L + 1)) {
   loglik[, i] <- log_lik(fit_part)[, i]
   to <- min(i + B - 1, i_refit)
-  logratio[, i] <- log_ratios(loglik, i:to)
-  psis_part <- psis(logratio[, i:i_refit], r_eff = NA)
-  ks <- pareto_k_values(psis_part)
-  max_k <- c(max_k, max(ks))
-  
-  if (any(ks > k_thres)) {
+  logratio <- log_ratios(loglik, i:to)
+  psis_part <- suppressWarnings(psis(logratio))
+  k <- pareto_k_values(psis_part)
+  ks <- c(ks, k)
+  if (k > k_thres) {
     # refit the model without a block of B observations
     i_refit <- i
     refits <- c(refits, i)
     fit_part <- update(fit_part, newdata = df[-(i:to), ], recompile = FALSE)
     loglik[, i] <- log_lik(fit_part, newdata = df[1:i, ])[, i]
-    logratio[, i] <- log_ratios(loglik, i:to)
     approx_elpds_1sap_block[i] <- log_mean_exp(loglik[, i])
   } else {
     lw_i <- weights(psis_part, normalize = TRUE)[, 1]
@@ -713,7 +708,7 @@ have a time-series of 98 observations and are predicting for
 $98-L = $ `r 98 - L` of them.
 
 ```{r, cache = FALSE}
-plot_max_k(max_k, ids = (L+1):N)
+plot_ks(ks, ids = (L + 1):N)
 ```
 
 Consequently, it is not surprising that PSIS-LFO-CV for block-1-SAP matches the
