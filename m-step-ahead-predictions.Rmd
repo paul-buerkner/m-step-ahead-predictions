@@ -1,12 +1,13 @@
 ---
 title: "Introducing PSIS-LFO-CV"
 subtitle: "Approximate leave-future-out cross-validation for time series models"
-author: Paul Buerkner, Aki Vehtari, Jonah Gabry
+author: Paul Bürkner, Aki Vehtari, Jonah Gabry
 output:
   html_document: default
   pdf_document: default
 editor_options: 
   chunk_output_type: console
+encoding: "UTF-8"
 ---
 
 ```{r setup, include=FALSE}
@@ -151,7 +152,7 @@ $\yy{<i}$ given $\theta_{<i}$.
 Non-factorizable models, which do not make this assumption, are discussed in a
 separate vignette [_Leave-one-out cross-validation for non-factorizable models_](http://mc-stan.org/loo/articles/loo2-non-factorizable.html).
 
-## [Approximate $M$-SAP using importance-sampling](#approximate_MSAP)
+## Approximate $M$-SAP using importance-sampling {#approximate_MSAP}
 
 Unfortunately, the math above makes use of the posterior distributions from many
 different fits of the model to different subsets of the data. That is, to obtain
@@ -246,7 +247,7 @@ ggplot(df, aes(x = year, y = y)) +
 The above plot shows rather strong autocorrelation of the time-series as well as
 some trend towards lower levels for later points in time. 
 
-We can specify an AR(2) model for these data using the **brms** package as
+We can specify an AR(6) model for these data using the **brms** package as
 follows:
 
 ```{r fit, results = "hide"}
@@ -254,7 +255,7 @@ control <- list(adapt_delta = 0.95)
 fit <- brm(
   y ~ 1, 
   data = df, 
-  autocor = cor_ar(~time, p = 2), 
+  autocor = cor_ar(~time, p = 6), 
   control = control, 
   seed = SEED, 
   chains = CHAINS
@@ -280,10 +281,10 @@ ggplot(cbind(df, preds), aes(x = year, y = Estimate)) +
 ```
 
 To allow for reasonable predictions of future values, we will require at least
-$L = 15$ historical observations (15 years) to make predictions.
+$L = 25$ historical observations (15 years) to make predictions.
 
 ```{r}
-L <- 15
+L <- 25
 ```
 
 We first perform approximate leave-one-out cross-validation (LOO-CV) for the
@@ -333,7 +334,8 @@ log_mean_exp <- function(x) {
 }
 
 # compute log of raw importance ratios
-log_ratios <- function(ll, ids = NULL) {
+# sums over observations *not* over posterior samples
+sum_log_ratios <- function(ll, ids = NULL) {
   if (!is.null(ids)) ll <- ll[, ids, drop = FALSE]
   - rowSums(ll)
 }
@@ -377,7 +379,7 @@ ids <- N:(L + 1)
 ks <- NULL
 
 for (i in ids) {
-  logratio <- log_ratios(loglik, i:N)
+  logratio <- sum_log_ratios(loglik, i:N)
   psis_part <- suppressWarnings(psis(logratio))
   ks <- c(ks, pareto_k_values(psis_part))
   lw_i <- weights(psis_part, normalize = TRUE)[, 1]
@@ -388,7 +390,7 @@ for (i in ids) {
 If we plot the Pareto $k$ estimates we can see that they do start to increase 
 quickly and that once we work backwards to about halfway through the data points 
 we get $k > 0.7$. This is indicated by the vertical line in the plot below, which 
-corresponds to the point $i^\star_1$ discussed in the section
+corresponds to the point $i^\star_1$ discussed in Section
 [Approximate $M$-SAP using importance-sampling](#approximate_MSAP) above.
 
 ```{r plot_ks}
@@ -442,7 +444,7 @@ ks <- NULL
 
 for (i in ids) {
   loglik[, i] <- log_lik(fit_part)[, i]
-  logratio <- log_ratios(loglik, i:i_refit)
+  logratio <- sum_log_ratios(loglik, i:i_refit)
   psis_part <- suppressWarnings(psis(logratio))
   k <- pareto_k_values(psis_part)
   ks <- c(ks, k)
@@ -513,9 +515,12 @@ approximate LFO-CV for the 4-SAP case.
 
 ### Exact $M$-step-ahead predictions
 
-The necessary steps are the same as for 1-SAP with the exception that the 
-log-density values of interest are now the sums of the log predictive 
-densities of four consequtive observations.
+The necessary steps are the same as for 1-SAP with the exception that the
+log-density values of interest are now the sums of the log predictive densities
+of four consequtive observations. Further, the stability of the PSIS
+approximation actually stays the same for all $M$ as it only depends on the
+number of observations we leave out, not on the number of observations we
+predict.
 
 ```{r exact_loglikm, results="hide"}
 M <- 4
@@ -553,7 +558,7 @@ for (i in ids) {
   ll <- log_lik(fit_part, newdata = df[1:(i + M - 1), ])
   loglikm[, i] <- rowSums(ll[, i:(i + M - 1)])
   loglik[, i] <- ll[, i]
-  logratio <- log_ratios(loglik, i:i_refit)
+  logratio <- sum_log_ratios(loglik, i:i_refit)
   psis_part <- suppressWarnings(psis(logratio))
   k <- pareto_k_values(psis_part)
   ks <- c(ks, k)
@@ -674,7 +679,6 @@ ggplot(dat_elpd_diff[(L + 1):N, ], aes(x = i, y = elpd_diff)) +
   labs(x = "Data Point", y = "ELPD diff")
 ```
 
-
 ### Approximate 1-step-ahead predictions
 
 We compute approximate PSIS-LFO-CV for block-1-SAP as follows.
@@ -691,7 +695,7 @@ ks <- NULL
 for (i in ids) {
   loglik[, i] <- log_lik(fit_part)[, i]
   to <- min(i + B - 1, i_refit)
-  logratio <- log_ratios(loglik, i:to)
+  logratio <- sum_log_ratios(loglik, i:to)
   psis_part <- suppressWarnings(psis(logratio))
   k <- pareto_k_values(psis_part)
   ks <- c(ks, k)
@@ -710,8 +714,8 @@ for (i in ids) {
 ```
 
 Here we needed `r length(refits)` refit(s), which is remarkable given that we
-have a time-series of 98 observations and are predicting for 
-$98-L = $ `r 98 - L` of them.
+have a time-series of 98 observations and are predicting for 98 - L = `r 98 - L` 
+of them.
 
 ```{r, cache = FALSE}
 plot_ks(ks, ids)
@@ -741,6 +745,12 @@ ggplot(dat_elpd_block, aes(x = approx_elpd, y = exact_elpd)) +
   geom_point(size = 2) +
   labs(x = "Approximate ELPDs", y = "Exact ELPDs")
 ```
+
+When increasing $M$ in block-M-SAP, we have to make sure to simultaneously
+increase the block size $B$, as well, in order to keep the assumptions of
+block-M-SAP satisfied. This also implies that the stability of the PSIS
+approximation will decrease as we increase $M$ in block-M-SAP because we have
+to leave out more observations.
 
 ## Conclusion
 
@@ -772,5 +782,5 @@ sessionInfo()
 
 ### Appendix: Licenses
 
-* Code &copy; 2018, Paul Buerkner, Aki Vehtari, Jonah Gabry (licensed under BSD-3).
-* Text &copy; 2018, Paul Buerkner, Aki Vehtari, Jonah Gabry (licensed under CC-BY-NC 4.0).
+* Code &copy; 2018, Paul Bürkner, Aki Vehtari, Jonah Gabry (licensed under BSD-3).
+* Text &copy; 2018, Paul Bürkner, Aki Vehtari, Jonah Gabry (licensed under CC-BY-NC 4.0).
