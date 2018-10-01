@@ -247,7 +247,7 @@ ggplot(df, aes(x = year, y = y)) +
 The above plot shows rather strong autocorrelation of the time-series as well as
 some trend towards lower levels for later points in time. 
 
-We can specify an AR(6) model for these data using the **brms** package as
+We can specify an AR(10) model for these data using the **brms** package as
 follows:
 
 ```{r fit, results = "hide"}
@@ -255,7 +255,7 @@ control <- list(adapt_delta = 0.95)
 fit <- brm(
   y ~ 1, 
   data = df, 
-  autocor = cor_ar(~time, p = 6), 
+  autocor = cor_ar(~time, p = 10), 
   control = control, 
   seed = SEED, 
   chains = CHAINS
@@ -422,7 +422,7 @@ rbind_print(
 ```
 
 Next, we compute approximate 1-SAP with refit at observations where 
-the Pareto $k$ estimate exceeds the threshold of $0.7$.
+the Pareto $k$ estimate exceeds the threshold of $0.65$.
 
 ```{r}
 k_thres <- 0.7
@@ -459,11 +459,11 @@ for (i in ids) {
     lw_i <- weights(psis_part, normalize = TRUE)[, 1]
     approx_elpds_1sap[i] <- log_sum_exp(lw_i + loglik[, i])
   }
-}
+} 
 ```
 
 We see that the final Pareto-$k$-estimates are mostly well below the threshold
-of 0.7 and that we only needed to refit the model `r length(refits)` times at
+of `r k_thres` and that we only needed to refit the model `r length(refits)` times at
 observations `r refits`.
 
 ```{r, cache=FALSE}
@@ -578,7 +578,7 @@ for (i in ids) {
     lw_i <- weights(psis_part, normalize = TRUE)[, 1]
     approx_elpds_4sap[i] <- log_sum_exp(lw_i + loglikm[, i])
   }
-}
+} 
 ```
 
 Again, we see that the final Pareto-$k$-estimates are mostly well below the
@@ -589,8 +589,8 @@ observations `r refits`.
 plot_ks(ks, ids)
 ```
 
-Similar to the 1-SAP case, the approximate ELPD computed for the 4-SAP case 
-is close to its exact counterpart.
+The approximate ELPD computed for the 4-SAP case is not as close to its exact 
+counterpart as in the 1-SAP case, but still not too bad.
 
 ```{r, cache = FALSE}
 approx_elpd_4sap <- sum(approx_elpds_4sap, na.rm = TRUE)
@@ -600,7 +600,9 @@ rbind_print(
 )
 ```
 
-Plotting exact against approximate pointwise predictions confirms this result.
+Plotting exact against approximate pointwise predictions confirms that, for a 
+few specific data points, the approximate predictions underestimate the exact
+predictions.
 
 ```{r, cache = FALSE}
 dat_elpd_4sap <- data.frame(
@@ -617,7 +619,7 @@ ggplot(dat_elpd_4sap, aes(x = approx_elpd, y = exact_elpd)) +
 ## 1-step-ahead predictions leaving out blocks of future values
 
 Depending on the particular time-series model and data, the Pareto $k$ estimates
-may exceed $0.7$ rather quickly (i.e., after only few observations) and so
+may exceed `r k_thres` rather quickly (i.e., after only few observations) and so
 many refits may be required even when carrying out the PSIS approximation
 to LFO-CV. In this case, another option is to exclude only the block of $B$ 
 future values that directly follow the observations to be predicted while 
@@ -701,7 +703,7 @@ for (i in ids) {
   ks <- c(ks, k)
   if (k > k_thres) {
     # refit the model without a block of B observations
-    i_refit <- i
+    i_refit <- i 
     refits <- c(refits, i)
     fit_part <- update(fit_part, newdata = df[-(i:to), ], recompile = FALSE)
     loglik[, i] <- log_lik(fit_part, newdata = df[1:i, ])[, i]
