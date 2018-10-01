@@ -589,8 +589,10 @@ observations `r refits`.
 plot_ks(ks, ids)
 ```
 
-The approximate ELPD computed for the 4-SAP case is not as close to its exact 
-counterpart as in the 1-SAP case, but still not too bad.
+The approximate ELPD computed for the 4-SAP case is not as close to its exact
+counterpart as in the 1-SAP case. Likely, we need to lower the threshold
+for the Pareto-k-values from `r k_thres` to `r k_thres - 0.05` or even 
+`r k_thres - 0.1` in order to achieve better results.
 
 ```{r, cache = FALSE}
 approx_elpd_4sap <- sum(approx_elpds_4sap, na.rm = TRUE)
