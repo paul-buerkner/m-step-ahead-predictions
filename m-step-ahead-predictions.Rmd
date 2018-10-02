@@ -256,6 +256,7 @@ fit <- brm(
   y ~ 1, 
   data = df, 
   autocor = cor_ar(~time, p = 10), 
+  prior = prior(normal(0, 0.5), class = "ar"),
   control = control, 
   seed = SEED, 
   chains = CHAINS
@@ -640,10 +641,10 @@ block-1-SAP.
 
 The differences between the code for LFO-CV for 1-SAP and the code for
 block-1-SAP are very small. We now just need to define a block size $B$ of
-left-out observations, which we set to $B = 10$ for the present case study.
+left-out observations, which we set to $B = 20$ for the present case study.
 
 ```{r exact_loglik_block, results="hide"}
-B <- 10
+B <- 20
 loglik <- matrix(nrow = nsamples(fit), ncol = N)
 for (i in N:(L + 1)) {
   to <- min(i + B - 1, N)
@@ -652,8 +653,9 @@ for (i in N:(L + 1)) {
 }
 ```
 
-Comparing the exact block-1-SAP to the exact 1-SAP reveals a substantial
-difference:
+Comparing the exact block-1-SAP to the exact 1-SAP reveals no substantial
+difference for this particular data set and model, but this may very well be
+different for other data sets and models.
 
 ```{r, cache = FALSE}
 exact_elpds_1sap_block <- apply(loglik, 2, log_mean_exp)
@@ -664,13 +666,15 @@ rbind_print(
 )
 ```
 
-This does not necessarily imply that observations depend on distant future values,
-but could instead be due to the fact that the model parameters were estimated 
-more precisely in the case of block-1-SAP since more data are available, 
-in particular for predicting observations early in the time series. 
-If this is the case we would expect the differences between the pointwise 
-ELPDs for the two cases to be larger for earlier observations. Indeed, this is
-what we see when plotting the differences:
+If exact block-1-SAP and exact 1-SAP were different, it would not necessarily
+imply that observations depend on distant future values, but could instead be
+due to the fact that the model parameters were estimated more precisely in the
+case of block-1-SAP since more data are available, in particular for predicting
+observations early in the time series. If this is the case we would expect the
+differences between the pointwise ELPDs for the two cases to be larger for
+earlier observations. To some degree, this is also what we see when plotting the
+differences for the present example, although these differences happen to cancel
+each other out in this case:
 
 ```{r, cache = FALSE}
 dat_elpd_diff <- data.frame(
@@ -694,7 +698,7 @@ fit_part <- fit
 ids <- N:(L + 1)
 i_refit <- N
 refits <- NULL
-ks <- NULL
+ks <- NULL 
 
 for (i in ids) {
   loglik[, i] <- log_lik(fit_part)[, i]
